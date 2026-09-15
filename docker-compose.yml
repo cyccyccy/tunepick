@@ -1,0 +1,64 @@
+services:
+  tunepick:
+    # 优先用本地构建；也可改为 image: yourname/tunepick:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tunepick:latest
+    container_name: tunepick
+    restart: unless-stopped
+
+    ports:
+      # 宿主端口可改（避免与现有 3000/8080 冲突）
+      - "8090:8090"
+
+    volumes:
+      # 音乐目录 —— 必须只读挂载（PRD：原始音频文件严格只读，绝不改写）
+      # 把 /volume1/music 换成你 NAS 上真实的音乐目录
+      - /volume1/music:/music:ro
+      # 数据目录 —— 自己的数据库（分片 JSON）与封面缓存，必须可写
+      - ./data:/data
+
+    environment:
+      # ---- 必填 ----
+      # 建议设置；为空时服务仅允许 127.0.0.1 访问并在界面告警
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
+      # Web 管理界面独立鉴权（与 API Token 分离，PRD FR-78）
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+
+      # ---- 数据源 ----
+      - SOURCE_KIND=localfs            # localfs（直读挂载目录）| navidrome（回退）
+      - MUSIC_DIR=/music
+      - DATA_DIR=/data
+
+      # ---- 在线刮削源（唯一开关是 ONLINE_SOURCES，逗号分隔）----
+      # MusicBrainz 对中文曲库实测命中仅 28~33%，默认关闭可显著提速（全库 5h → 约 45min）
+      # 想启用交叉验证时改为：netease,musicbrainz,caa
+      - ONLINE_SOURCES=netease,caa
+      # 总开关：设为 false 则完全不访问外网（纯本地 L1 模式）
+      - ONLINE_ENABLED=true
+
+      # ---- LLM（L3：流派/情绪/场景的唯一来源，未配置则自动降级为 L1+L2）----
+      - LLM_ENABLED=true
+      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-https://api.deepseek.com/chat/completions}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-deepseek-flash}
+      # ⚠️ 推理模型（deepseek-flash / v4-pro）会先消耗 token 在推理上，
+      #    预算不足时 content 为空 → 打标失败。务必给足。
+      - LLM_MAX_TOKENS=16384
+      - LLM_BATCH_SIZE=8
+
+      - TZ=Asia/Shanghai
+
+    # 资源上限（飞牛 NAS 内存可控，PRD §8.2）
+    mem_limit: 1g
+    cpus: 1.0
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8090/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3

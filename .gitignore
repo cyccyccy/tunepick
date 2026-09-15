@@ -1,0 +1,29 @@
+# 含 Navidrome 密码与 LLM API Key，绝不提交
+.env
+.env.*
+!.env.example
+
+# 运行时数据（曲库分片 / 封面缓存 / 日志）
+data/
+*.log
+
+# 真实音频样本（有版权，且体积大；仅用于本地解析验证，不入库）
+tests/fixtures/music/
+*.mp3
+*.flac
+*.m4a
+*.wav
+
+# 原型 spike 产物（13MB 数据快照，报告已归档在 docs/，无需入库）
+prototype/data/
+prototype/*.log
+
+# 本地运维脚本（推送 GitHub 用，含从环境变量读凭据的逻辑，不入库）
+/.gh-*.js
+
+# 依赖
+node_modules/
+
+# 打包产物
+dist/
+*.tar.gz

@@ -1,0 +1,10 @@
+'use strict';
+const fs=require('fs');
+const R='D:/AI/WorkBuddy/2026-08-27-23-46-21/nas-music-scraper/prototype/data/';
+const s=JSON.parse(fs.readFileSync(R+'sample-100.json','utf8'));
+console.log('sample keys:',Object.keys(s));
+console.log('meta:',JSON.stringify(s.meta,null,1).slice(0,2000));
+console.log('sample[0]:',JSON.stringify(s.sample[0],null,1).slice(0,1500));
+const l1=JSON.parse(fs.readFileSync(R+'l1-report.json','utf8'));
+console.log('l1-report keys:',Object.keys(l1));
+console.log(JSON.stringify(l1,null,1).slice(0,3500));

@@ -1,0 +1,18 @@
+{
+  "name": "nas-music-scraper-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Spike: measure L1 (embedded tag) + L2 (online scrape) hit-rate for a Chinese car-audio music library. Zero dependencies.",
+  "scripts": {
+    "probe": "node src/00-probe.js",
+    "catalog": "node src/01-fetch-catalog.js",
+    "l1": "node src/02-analyze-l1.js",
+    "sample": "node src/03-sample.js",
+    "l2": "node src/04-run-l2.js",
+    "report": "node src/05-gen-report.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {}
+}

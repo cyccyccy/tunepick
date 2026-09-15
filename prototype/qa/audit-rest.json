@@ -1,0 +1,453 @@
+{
+ "q3": {
+  "neteaseAttemptTotal": 187,
+  "neteaseEntriesWithAttempts": 100,
+  "neteaseCodeDistribution": {
+   "200": 187
+  },
+  "neteaseStatusDistribution": {
+   "200": 187
+  },
+  "neteaseViaDistribution": {
+   "fetch": 187
+  },
+  "neteaseEndpointDistribution": {
+   "cloudsearch-pc": 187
+  },
+  "neteaseEmptyCandidateAttempts": 6,
+  "neteaseNotOk": 0,
+  "neteaseCodeNot200": 0,
+  "neteaseStatusNot200": 0,
+  "neteaseMsgPresent": 0,
+  "resultJsonTelemetry": {
+   "netease": {
+    "requests": 0,
+    "errors": 0,
+    "blocked": 0,
+    "emptyResult": 0,
+    "totalMs": 0,
+    "limiterWaitMs": 0,
+    "lastError": null,
+    "byEndpoint": {},
+    "bannedEndpoints": []
+   },
+   "musicbrainz": {
+    "requests": 0,
+    "errors": 0,
+    "emptyResult": 0,
+    "totalMs": 0,
+    "limiterWaitMs": 0,
+    "lastError": null
+   },
+   "neteaseLyric": {
+    "requests": 0,
+    "errors": 0,
+    "available": 0,
+    "totalMs": 0
+   }
+  },
+  "lyricRequestedInSummary": 63,
+  "lyricAvailableInSummary": 54,
+  "segment": [
+   {
+    "range": "0-19",
+    "attempts": 58,
+    "tracks": 20,
+    "avgCandidates": 7.47,
+    "avgSongCount": 208,
+    "songCountPresent": 58,
+    "avgElapsedMs": 251,
+    "maxElapsedMs": 622,
+    "zeroCandidate": 2,
+    "viaCurl": 0,
+    "hitRate": 20
+   },
+   {
+    "range": "20-39",
+    "attempts": 35,
+    "tracks": 20,
+    "avgCandidates": 6.63,
+    "avgSongCount": 199,
+    "songCountPresent": 35,
+    "avgElapsedMs": 236,
+    "maxElapsedMs": 470,
+    "zeroCandidate": 4,
+    "viaCurl": 0,
+    "hitRate": 60
+   },
+   {
+    "range": "40-59",
+    "attempts": 44,
+    "tracks": 20,
+    "avgCandidates": 7.59,
+    "avgSongCount": 204,
+    "songCountPresent": 44,
+    "avgElapsedMs": 237,
+    "maxElapsedMs": 673,
+    "zeroCandidate": 0,
+    "viaCurl": 0,
+    "hitRate": 75
+   },
+   {
+    "range": "60-79",
+    "attempts": 21,
+    "tracks": 20,
+    "avgCandidates": 7.24,
+    "avgSongCount": 246,
+    "songCountPresent": 21,
+    "avgElapsedMs": 283,
+    "maxElapsedMs": 702,
+    "zeroCandidate": 0,
+    "viaCurl": 0,
+    "hitRate": 90
+   },
+   {
+    "range": "80-99",
+    "attempts": 29,
+    "tracks": 20,
+    "avgCandidates": 7.41,
+    "avgSongCount": 157,
+    "songCountPresent": 29,
+    "avgElapsedMs": 194,
+    "maxElapsedMs": 271,
+    "zeroCandidate": 0,
+    "viaCurl": 0,
+    "hitRate": 70
+   }
+  ]
+ },
+ "q4": {
+  "total": 2903,
+  "coverPrefix": {
+   "al": 14,
+   "mf": 2889
+  },
+  "alCount": 14,
+  "mfCount": 2889,
+  "emptyCount": 0,
+  "samplesMf": [
+   {
+    "coverArt": "mf-uKoli56hxeqdsnJz3FDEOm_6a9d4990",
+    "title": "DJ - 中外文车载经典语录劲爆串烧 小洲 (2017年1月收录)",
+    "artist": "[Unknown Artist]"
+   },
+   {
+    "coverArt": "mf-qPjOwtxU6paoiPm2SC6vFH_6aa661ab",
+    "title": "无愧于心",
+    "artist": "孙楠"
+   },
+   {
+    "coverArt": "mf-3qQwlmyfKz1g9Y3Yi0wSUB_6aa661ac",
+    "title": "放生",
+    "artist": "范逸臣"
+   }
+  ],
+  "samplesAl": [
+   {
+    "coverArt": "al-4rs0DU5ZUZnxaV4CyyS1FS_0",
+    "title": "偏爱",
+    "artist": "张芸京"
+   },
+   {
+    "coverArt": "al-69IwB2p7tQDejD3lowUIFo_0",
+    "title": "不爱我就拉倒-周杰伦",
+    "artist": "[Unknown Artist]"
+   },
+   {
+    "coverArt": "al-69IwB2p7tQDejD3lowUIFo_0",
+    "title": "还在流浪-周杰伦",
+    "artist": "[Unknown Artist]"
+   }
+  ],
+  "catalogTrackKeys": [
+   "id",
+   "title",
+   "album",
+   "artist",
+   "displayArtist",
+   "displayAlbumArtist",
+   "albumArtist",
+   "artists",
+   "genres",
+   "moods",
+   "track",
+   "year",
+   "duration",
+   "bitRate",
+   "suffix",
+   "contentType",
+   "size",
+   "path",
+   "musicBrainzId",
+   "isrc",
+   "bpm",
+   "comment",
+   "coverArt",
+   "albumId",
+   "artistId",
+   "created"
+  ]
+ },
+ "q5": {
+  "sampleFieldCounts": {
+   "artist": 87,
+   "album": 64,
+   "year": 53,
+   "cover": 63,
+   "lyrics": 54,
+   "perLayerArtist": {
+    "A": 100,
+    "B": 66.7,
+    "C": 76,
+    "D": 93.3,
+    "E": 96
+   },
+   "perLayerYear": {
+    "A": 15,
+    "B": 60,
+    "C": 44,
+    "D": 80,
+    "E": 72
+   }
+  },
+  "weighted": {
+   "M01_artist": 93.9,
+   "M02_year": 57.7,
+   "M06_lyrics": 62.1,
+   "M07_cover": 64.8,
+   "M18_combinedStrict": 67.4,
+   "neteaseStrict": 64.8,
+   "neteaseRelaxed": 73.3,
+   "mbStrict": 36.6,
+   "union": 84.3,
+   "perLayer": {
+    "netease": {
+     "A": 20,
+     "B": 60,
+     "C": 72,
+     "D": 86.7,
+     "E": 76
+    },
+    "mb": {
+     "A": 0,
+     "B": 26.7,
+     "C": 8,
+     "D": 60,
+     "E": 52
+    },
+    "combined": {
+     "A": 20,
+     "B": 60,
+     "C": 72,
+     "D": 86.7,
+     "E": 80
+    },
+    "union": {
+     "A": 65,
+     "B": 66.7,
+     "C": 76,
+     "D": 86.7,
+     "E": 92
+    }
+   }
+  },
+  "timing": {
+   "elapsedPerTrack": [
+    12305,
+    5340,
+    9790,
+    11110,
+    9116,
+    4000,
+    9342,
+    8214,
+    3995,
+    6707,
+    10556,
+    4953,
+    4578,
+    7847,
+    5787,
+    10264,
+    6210,
+    9386,
+    17035,
+    11125,
+    1957,
+    4342,
+    4202,
+    395,
+    6390,
+    5742,
+    4569,
+    4217,
+    1690,
+    9464,
+    3029,
+    4053,
+    1856,
+    9606,
+    3933,
+    6143,
+    5067,
+    8987,
+    6571,
+    6885,
+    2478,
+    27654,
+    17057,
+    6875,
+    8990,
+    5865,
+    6689,
+    4527,
+    5855,
+    5163,
+    4872,
+    6506,
+    3619,
+    3946,
+    5999,
+    6537,
+    11942,
+    4628,
+    8304,
+    6168,
+    2956,
+    3661,
+    4651,
+    1829,
+    3349,
+    6898,
+    6532,
+    7872,
+    5884,
+    4881,
+    5594,
+    2440,
+    4575,
+    3789,
+    4146,
+    4345,
+    5733,
+    3835,
+    2577,
+    4841,
+    4710,
+    3494,
+    2843,
+    5558,
+    7221,
+    7562,
+    4741,
+    4022,
+    3207,
+    6878,
+    2464,
+    11606,
+    2658,
+    4566,
+    5544,
+    5872,
+    3881,
+    7936,
+    10606,
+    3530
+   ],
+   "meanElapsed": 6197,
+   "medianElapsed": 5558,
+   "neRequestsPerTrack": 1.87,
+   "mbRequestsPerTrack": 1.37,
+   "lyricRequests": 63,
+   "extrapolatedMinutesAtMean": 300,
+   "extrapolatedMinutesAt6197": 300
+  },
+  "pseudoArtists": {
+   "list": [
+    [
+     "Cydian",
+     325
+    ],
+    [
+     "不改音响提升六倍音质",
+     31
+    ],
+    [
+     "公众号：阿乐资源库",
+     24
+    ],
+    [
+     "公众号：小草新剧社，所有内容仅供试听，严禁商用，谢谢合作！！",
+     10
+    ],
+    [
+     "DJ °¢Ê¥",
+     3
+    ],
+    [
+     "华语群星",
+     1
+    ],
+    [
+     "DJ Ð¡Óã¶ù",
+     1
+    ],
+    [
+     "DJ Candy&ÅíóÝ",
+     1
+    ]
+   ],
+   "totalTracks": 396
+  },
+  "unknownArtistTracks": 704
+ },
+ "q6": {
+  "mbAttemptTotal": 137,
+  "mbStatus": {
+   "200": 137
+  },
+  "mbVia": {
+   "fetch": 78,
+   "curl": 59
+  },
+  "mbErrors": 0,
+  "mbNotOk": 0,
+  "mbEmptyCandidates": 87,
+  "mbEmptyWithCountZero": 63,
+  "mbEmptyWithCountNull": 24,
+  "mbErrorsSample": [],
+  "mbErrorByStatus": {},
+  "mbNoCandidateByIndexBucket": [
+   {
+    "range": "0-19",
+    "attempts": 40,
+    "empty": 36,
+    "avgElapsed": 1884
+   },
+   {
+    "range": "20-39",
+    "attempts": 22,
+    "empty": 12,
+    "avgElapsed": 1344
+   },
+   {
+    "range": "40-59",
+    "attempts": 21,
+    "empty": 13,
+    "avgElapsed": 2632
+   },
+   {
+    "range": "60-79",
+    "attempts": 26,
+    "empty": 10,
+    "avgElapsed": 1321
+   },
+   {
+    "range": "80-99",
+    "attempts": 28,
+    "empty": 16,
+    "avgElapsed": 1731
+   }
+  ]
+ }
+}

@@ -1,0 +1,551 @@
+{
+ "digest": {
+  "reproduced": {
+   "netease": {
+    "tierHist": {
+     "exact": 42,
+     "likely": 21,
+     "weak": 23,
+     "miss": 14
+    },
+    "hitA": 63,
+    "relaxedHits": 69
+   },
+   "musicbrainz": {
+    "tierHist": {
+     "exact": 19,
+     "likely": 9,
+     "weak": 7,
+     "miss": 65
+    },
+    "hitA": 28,
+    "relaxedHits": 30
+   },
+   "combined": {
+    "hitA": 64,
+    "sampleN": 100,
+    "pct": 64
+   }
+  },
+  "q1": {
+   "netease": {
+    "A": 63,
+    "B": 55,
+    "C": 21,
+    "C2": 23,
+    "weakestOnly": 5,
+    "pseudoCount": 38,
+    "artistExact": 23,
+    "artistNear": 2,
+    "artistNone": 38,
+    "pseudoButArtistExact": 0,
+    "pseudoAndDurOK": 33,
+    "pseudoNoDur": 5
+   },
+   "musicbrainz": {
+    "A": 28,
+    "B": 20,
+    "C": 10,
+    "C2": 11,
+    "pseudoCount": 13,
+    "artistExact": 13,
+    "artistNear": 1,
+    "artistNone": 14
+   },
+   "combined": {
+    "A": 64,
+    "B": 59,
+    "C": 25,
+    "C2": 25
+   },
+   "titleSimAgreement": {
+    "n": 91,
+    "maxDelta": 0.027,
+    "over25": []
+   }
+  }
+ },
+ "q2": {
+  "nonMonotonic": [
+   {
+    "sampleIndex": 0,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "exact",
+    "titleSim": 0.96,
+    "artistSim": 0.1,
+    "durDiff": 1,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "Lost Stories/Alan Walker"
+   },
+   {
+    "sampleIndex": 2,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.844,
+    "artistSim": 0,
+    "durDiff": 6,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "零封"
+   },
+   {
+    "sampleIndex": 2,
+    "source": "musicbrainz",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.844,
+    "artistSim": 0,
+    "durDiff": null,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "王力宏"
+   },
+   {
+    "sampleIndex": 4,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "exact",
+    "titleSim": 0.924,
+    "artistSim": 0.182,
+    "durDiff": 2,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "Meghan Trainor/Kevin Kadish"
+   },
+   {
+    "sampleIndex": 5,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.893,
+    "artistSim": 1,
+    "durDiff": 29,
+    "localArtist": "蓝琪儿",
+    "artistUsable": true,
+    "onlineArtist": "蓝琪儿"
+   },
+   {
+    "sampleIndex": 7,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.95,
+    "artistSim": 0,
+    "durDiff": 19,
+    "localArtist": "闯红灯的杜蕾斯",
+    "artistUsable": true,
+    "onlineArtist": "Justin Bieber"
+   },
+   {
+    "sampleIndex": 8,
+    "source": "musicbrainz",
+    "tier": "weak",
+    "tierRelaxed": "exact",
+    "titleSim": 0.932,
+    "artistSim": 0.125,
+    "durDiff": 4,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "Sunshine"
+   },
+   {
+    "sampleIndex": 13,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.827,
+    "artistSim": 0.167,
+    "durDiff": 0,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "Adele"
+   },
+   {
+    "sampleIndex": 15,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.906,
+    "artistSim": 0.1,
+    "durDiff": 0,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "Alan Walker"
+   },
+   {
+    "sampleIndex": 17,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.865,
+    "artistSim": 0,
+    "durDiff": 0,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "Serebro"
+   },
+   {
+    "sampleIndex": 18,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.855,
+    "artistSim": 0.1,
+    "durDiff": 0,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "Alan Walker/Iselin Solheim"
+   },
+   {
+    "sampleIndex": 19,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.848,
+    "artistSim": 0.083,
+    "durDiff": 0,
+    "localArtist": "Cydian",
+    "artistUsable": true,
+    "onlineArtist": "少女时代-TaeTiSeo"
+   },
+   {
+    "sampleIndex": 25,
+    "source": "musicbrainz",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.794,
+    "artistSim": 1,
+    "durDiff": 19,
+    "localArtist": "东方传奇",
+    "artistUsable": true,
+    "onlineArtist": "东方传奇"
+   },
+   {
+    "sampleIndex": 29,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.847,
+    "artistSim": 0,
+    "durDiff": 2,
+    "localArtist": "不改音响提升六倍音质",
+    "artistUsable": true,
+    "onlineArtist": "J. Balvin/Willy William/Beyoncé"
+   },
+   {
+    "sampleIndex": 38,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.833,
+    "artistSim": 0,
+    "durDiff": 27,
+    "localArtist": "[Unknown Artist]",
+    "artistUsable": false,
+    "onlineArtist": "何洛林"
+   },
+   {
+    "sampleIndex": 44,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.875,
+    "artistSim": 0,
+    "durDiff": 25,
+    "localArtist": "[Unknown Artist]",
+    "artistUsable": false,
+    "onlineArtist": "小鱼儿"
+   },
+   {
+    "sampleIndex": 52,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.9,
+    "artistSim": 0,
+    "durDiff": 26,
+    "localArtist": "[Unknown Artist]",
+    "artistUsable": false,
+    "onlineArtist": "许巍"
+   },
+   {
+    "sampleIndex": 53,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.773,
+    "artistSim": 0,
+    "durDiff": 3,
+    "localArtist": "[Unknown Artist]",
+    "artistUsable": false,
+    "onlineArtist": "黄丽玲"
+   },
+   {
+    "sampleIndex": 56,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.906,
+    "artistSim": 0,
+    "durDiff": 0,
+    "localArtist": "不改音响提升六倍音质",
+    "artistUsable": true,
+    "onlineArtist": "陈小熊"
+   },
+   {
+    "sampleIndex": 57,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.906,
+    "artistSim": 0,
+    "durDiff": 19,
+    "localArtist": "[Unknown Artist]",
+    "artistUsable": false,
+    "onlineArtist": "麻辣热可可"
+   },
+   {
+    "sampleIndex": 70,
+    "source": "musicbrainz",
+    "tier": "weak",
+    "tierRelaxed": "exact",
+    "titleSim": 1,
+    "artistSim": 0,
+    "durDiff": 9,
+    "localArtist": "张杰",
+    "artistUsable": true,
+    "onlineArtist": "Pearl Jam"
+   },
+   {
+    "sampleIndex": 75,
+    "source": "musicbrainz",
+    "tier": "exact",
+    "tierRelaxed": "weak",
+    "titleSim": 0.75,
+    "artistSim": 1,
+    "durDiff": 0,
+    "localArtist": "那英",
+    "artistUsable": true,
+    "onlineArtist": "那英"
+   },
+   {
+    "sampleIndex": 90,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "exact",
+    "titleSim": 1,
+    "artistSim": 0,
+    "durDiff": 7,
+    "localArtist": "徐誉滕",
+    "artistUsable": true,
+    "onlineArtist": "安琥"
+   },
+   {
+    "sampleIndex": 91,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 1,
+    "artistSim": 0,
+    "durDiff": 22,
+    "localArtist": "龙梅子",
+    "artistUsable": true,
+    "onlineArtist": "易欣"
+   },
+   {
+    "sampleIndex": 94,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.667,
+    "artistSim": 1,
+    "durDiff": 5,
+    "localArtist": "童安格",
+    "artistUsable": true,
+    "onlineArtist": "童安格"
+   },
+   {
+    "sampleIndex": 97,
+    "source": "musicbrainz",
+    "tier": "weak",
+    "tierRelaxed": "exact",
+    "titleSim": 1,
+    "artistSim": 0,
+    "durDiff": null,
+    "localArtist": "伍佰",
+    "artistUsable": true,
+    "onlineArtist": "劉德華"
+   },
+   {
+    "sampleIndex": 98,
+    "source": "netease",
+    "tier": "weak",
+    "tierRelaxed": "likely",
+    "titleSim": 0.864,
+    "artistSim": 0,
+    "durDiff": 1,
+    "localArtist": "不改音响提升六倍音质",
+    "artistUsable": true,
+    "onlineArtist": "王心凌"
+   },
+   {
+    "sampleIndex": 99,
+    "source": "netease",
+    "tier": "likely",
+    "tierRelaxed": "weak",
+    "titleSim": 0.75,
+    "artistSim": 0,
+    "durDiff": 0,
+    "localArtist": "[Unknown Artist]",
+    "artistUsable": false,
+    "onlineArtist": "许茹芸"
+   }
+  ],
+  "strictHitRelaxedMiss": [
+   "5/netease",
+   "25/musicbrainz",
+   "38/netease",
+   "44/netease",
+   "52/netease",
+   "53/netease",
+   "57/netease",
+   "75/musicbrainz",
+   "94/netease",
+   "99/netease"
+  ],
+  "strictMissRelaxedHit": [
+   "0/netease",
+   "2/netease",
+   "2/musicbrainz",
+   "4/netease",
+   "7/netease",
+   "8/musicbrainz",
+   "13/netease",
+   "15/netease",
+   "17/netease",
+   "18/netease",
+   "19/netease",
+   "29/netease",
+   "56/netease",
+   "70/musicbrainz",
+   "90/netease",
+   "91/netease",
+   "97/musicbrainz",
+   "98/netease"
+  ]
+ },
+ "q2b": {
+  "per": {
+   "netease": {
+    "recorded": 69,
+    "reRanked": 77,
+    "union": 77,
+    "poolLimited": 93
+   },
+   "musicbrainz": {
+    "recorded": 30,
+    "reRanked": 32,
+    "union": 32,
+    "poolLimited": 1
+   }
+  },
+  "recoveredByReRanking": []
+ },
+ "q2c": {
+  "relaxedRecorded": 72,
+  "unionTrackLevel": 78
+ },
+ "sixClaim": [
+  {
+   "sampleIndex": 5,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.893,
+   "artistSim": 1,
+   "durDiff": 29,
+   "durFactor": 0.85,
+   "localTitle": "火火的爱",
+   "onlineTitle": "火火的爱 (广场舞)"
+  },
+  {
+   "sampleIndex": 38,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.833,
+   "artistSim": 0,
+   "durDiff": 27,
+   "durFactor": 0.85,
+   "localTitle": "周杰伦-以父之名",
+   "onlineTitle": "周杰伦“以父之名”Dark Hip Hop Beat"
+  },
+  {
+   "sampleIndex": 44,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.875,
+   "artistSim": 0,
+   "durDiff": 25,
+   "durFactor": 0.85,
+   "localTitle": "周杰伦-双截棍",
+   "onlineTitle": "双截棍"
+  },
+  {
+   "sampleIndex": 52,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.9,
+   "artistSim": 0,
+   "durDiff": 26,
+   "durFactor": 0.85,
+   "localTitle": "蓝莲花--雷婷",
+   "onlineTitle": "蓝莲花"
+  },
+  {
+   "sampleIndex": 53,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.773,
+   "artistSim": 0,
+   "durDiff": 3,
+   "durFactor": 1,
+   "localTitle": "陶大帅_习惯了一个人(All-Studio-DjCupid.小秋-ReMix)",
+   "onlineTitle": "一个人"
+  },
+  {
+   "sampleIndex": 57,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.906,
+   "artistSim": 0,
+   "durDiff": 19,
+   "durFactor": 0.85,
+   "localTitle": "周杰伦-爸 我回来了",
+   "onlineTitle": "爸我回来了"
+  },
+  {
+   "sampleIndex": 94,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.667,
+   "artistSim": 1,
+   "durDiff": 5,
+   "durFactor": 1,
+   "localTitle": "明天是否还是爱我",
+   "onlineTitle": "明天你是否依然爱我"
+  },
+  {
+   "sampleIndex": 99,
+   "tier": "likely",
+   "tierRelaxed": "weak",
+   "titleSim": 0.75,
+   "artistSim": 0,
+   "durDiff": 0,
+   "durFactor": 1,
+   "localTitle": "禁止悲傷",
+   "onlineTitle": "禁止悲伤"
+  }
+ ]
+}

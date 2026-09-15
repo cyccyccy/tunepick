@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log*
+.git
+.gitignore
+data/
+tests/
+prototype/
+docs/
+*.log
+.env
+.env.*
+!.env.example
+server.log
+.recon-*
+.debug-*
+.t-*.js
+.dbg*.js

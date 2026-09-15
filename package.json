@@ -1,0 +1,20 @@
+{
+  "name": "tunepick",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NAS 音乐元数据刮削服务：直读本地音乐文件，三级刮削（内嵌标签→在线源→LLM）并提供 REST API + Web 管理界面",
+  "type": "commonjs",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "check": "node scripts/check-all.js",
+    "probe": "node scripts/probe-dir.js"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "dependencies": {},
+  "devDependencies": {},
+  "license": "MIT"
+}

@@ -1,0 +1,70 @@
+# NAS 专用：直接拉取 GHCR 已构建好的镜像，不在 NAS 上构建。
+#
+# 用法（先在 GitHub 网页把本仓库设为私有并跑通 Actions）：
+#   1. 把下面 <OWNER> 全部替换成你的 GitHub 用户名（小写）
+#   2. 把 /volume1/music 换成你 NAS 上真实的音乐目录
+#   3. 复制 .env.example 为 .env 并填好密钥
+#   4. docker compose -f docker-compose.ghcr.yml up -d
+#   5. 以后更新：docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compose.ghcr.yml up -d
+#
+# ⚠️ 私有镜像需先在 NAS 登录一次：
+#      echo <你的GHCR_TOKEN> | docker login ghcr.io -u <OWNER> --password-stdin
+#    token 在 GitHub → Settings → Developer settings → Personal access tokens
+#    → Tokens(classic) 勾选 read:packages
+
+services:
+  tunepick:
+    image: ghcr.io/<OWNER>/tunepick:latest
+    container_name: tunepick
+    restart: unless-stopped
+
+    ports:
+      - "8090:8090"
+
+    volumes:
+      # 音乐目录 —— 必须只读挂载（PRD：原始音频文件严格只读，绝不改写）
+      - /volume1/music:/music:ro
+      # 数据目录 —— 自己的数据库（分片 JSON）与封面缓存，必须可写
+      - ./data:/data
+
+    environment:
+      # ---- 必填 ----
+      # 为空时服务仅允许 127.0.0.1 访问并在界面告警
+      - AUTH_TOKEN=${AUTH_TOKEN:-}
+      # Web 管理界面独立鉴权（与 API Token 分离）
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+
+      # ---- 数据源 ----
+      # ⚠️ 只能是 localfs（无连字符）或 navidrome。拼错会启动失败（故意的）
+      - SOURCE_KIND=localfs
+      - MUSIC_DIR=/music
+      - DATA_DIR=/data
+
+      # ---- 在线刮削源 ----
+      # 唯一开关是 ONLINE_SOURCES（逗号分隔）。不存在 NETEASE_ENABLED 等单独变量。
+      # MusicBrainz 对中文曲库实测命中仅 28~33%，去掉可把全库 L2 从 ~5h 压到 ~45min
+      - ONLINE_SOURCES=netease,caa
+      - ONLINE_ENABLED=true
+
+      # ---- LLM（L3：流派/情绪/场景的唯一来源，未配置则自动降级为 L1+L2）----
+      - LLM_ENABLED=true
+      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+      - LLM_ENDPOINT=${LLM_ENDPOINT:-https://api.deepseek.com/chat/completions}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-deepseek-flash}
+      # ⚠️ 推理模型会先把 token 消耗在推理上，预算不足则 content 为空 → 打标失败
+      - LLM_MAX_TOKENS=16384
+      - LLM_BATCH_SIZE=8
+
+      - TZ=Asia/Shanghai
+
+    mem_limit: 1g
+    cpus: 1.0
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8090/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
