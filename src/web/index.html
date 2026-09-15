@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TunePick · 音乐元数据刮削服务</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="logo">TP</span> TunePick</div>
+  <nav class="nav">
+    <a href="#/overview" data-nav="overview">概览</a>
+    <a href="#/scan" data-nav="scan">扫描任务</a>
+    <a href="#/report" data-nav="report">质量报告</a>
+    <a href="#/review" data-nav="review">标签审阅</a>
+    <a href="#/library" data-nav="library">曲库浏览</a>
+    <a href="#/sources" data-nav="sources">数据源</a>
+    <a href="#/llm" data-nav="llm">LLM 配置</a>
+    <a href="#/logs" data-nav="logs">日志</a>
+  </nav>
+  <div class="spacer"></div>
+  <button id="btn-token" class="btn-ghost" title="设置 API 访问令牌">令牌</button>
+</header>
+
+<div id="alert-bar" class="alert hidden"></div>
+
+<main id="view" class="view"></main>
+
+<script src="/app.js"></script>
+</body>
+</html>
