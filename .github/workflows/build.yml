@@ -92,3 +92,7 @@ jobs:
           tags: ${{ steps.meta_acr.outputs.tags }}
           labels: ${{ steps.meta_acr.outputs.labels }}
           cache-from: type=gha
+          # 阿里云个人版 ACR 不认 OCI provenance 证明清单，
+          # 开了会报：denied: unknown manifest class for application/vnd.oci.empty.v1+json
+          provenance: false
+          sbom: false
