@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TunePick · 登录</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0d0d0d; color: #e8e8e8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .card {
+    width: 380px; max-width: 92vw; padding: 32px 28px;
+    background: #171717; border: 1px solid #2a2a2a; border-radius: 14px;
+  }
+  .logo { font-size: 22px; font-weight: 700; letter-spacing: .5px; margin-bottom: 6px; }
+  .logo span { color: #FF6B35; }
+  .sub { font-size: 13px; color: #8a8a8a; margin-bottom: 24px; line-height: 1.6; }
+  label { display: block; font-size: 13px; color: #b0b0b0; margin-bottom: 8px; }
+  input {
+    width: 100%; padding: 11px 12px; font-size: 14px;
+    background: #0d0d0d; color: #e8e8e8;
+    border: 1px solid #333; border-radius: 8px; outline: none;
+  }
+  input:focus { border-color: #FF6B35; }
+  button {
+    width: 100%; margin-top: 18px; padding: 11px;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    background: #FF6B35; color: #fff; border: 0; border-radius: 8px;
+  }
+  button:hover { background: #ff7f4f; }
+  .err { margin-top: 14px; font-size: 13px; color: #ff6b6b; min-height: 18px; }
+  .tip { margin-top: 20px; padding-top: 16px; border-top: 1px solid #262626; font-size: 12px; color: #777; line-height: 1.7; }
+  code { background: #222; padding: 1px 5px; border-radius: 4px; color: #ffb08a; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">Tune<span>Pick</span></div>
+  <div class="sub">输入访问令牌以进入管理界面</div>
+
+  <label for="tok">访问令牌（AUTH_TOKEN）</label>
+  <input id="tok" type="password" placeholder="粘贴 compose 里 AUTH_TOKEN 的值" autocomplete="off">
+  <div class="err" id="err"></div>
+  <button id="go">进入</button>
+
+  <div class="tip">
+    令牌就是 docker compose 里 <code>AUTH_TOKEN</code> 的值，手机 App 连接时也填同一个。<br>
+    忘了可以在 NAS 上执行 <code>docker exec tunepick printenv AUTH_TOKEN</code> 查看。
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var input = document.getElementById('tok');
+  var err = document.getElementById('err');
+
+  function setCookie(v) {
+    document.cookie = 'tp_token=' + encodeURIComponent(v) + '; path=/; SameSite=Lax';
+  }
+
+  async function submit() {
+    var v = (input.value || '').trim();
+    if (!v) { err.textContent = '请先填写令牌'; return; }
+    err.textContent = '校验中…';
+    try {
+      // 注意：不能用 /api/health 校验——它是免鉴权端点，任何令牌都会返回 200。
+      // 必须打一个受 AUTH_TOKEN 保护的端点（这里用轻量的 /api/sources）。
+      var res = await fetch('/api/sources', {
+        headers: { Authorization: 'Bearer ' + v },
+        cache: 'no-store',
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      setCookie(v);
+      location.href = '/';
+    } catch (e) {
+      err.textContent = '令牌无效（' + e.message + '），请检查后重试';
+    }
+  }
+
+  document.getElementById('go').addEventListener('click', submit);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+  input.focus();
+})();
+</script>
+</body>
+</html>
