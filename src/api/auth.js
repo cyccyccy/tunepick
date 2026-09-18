@@ -39,6 +39,25 @@ function checkAdmin(req) {
   return decoded.slice(0, i) === config.ADMIN_USER && decoded.slice(i + 1) === config.ADMIN_PASSWORD;
 }
 
+/**
+ * 从 Cookie 读取前端保存的令牌（tp_token）
+ * Web 界面改为单一凭据（= AUTH_TOKEN）：登录页写入 Cookie 后，
+ * 页面加载与 /api 请求共用同一份令牌，避免出现「Basic 弹窗 ↔ 令牌弹窗」互相踢皮球。
+ */
+function cookieToken(req) {
+  const raw = req.headers.cookie || '';
+  const m = /(?:^|;\s*)tp_token=([^;]*)/.exec(raw);
+  if (!m) return '';
+  try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; }
+}
+
+/** Web 页面鉴权：Cookie 令牌 / Bearer / Basic 任一通过即可 */
+function checkWeb(req) {
+  if (config.AUTH_TOKEN && cookieToken(req) === config.AUTH_TOKEN) return true;
+  if (checkApi(req)) return true;
+  return checkAdmin(req);
+}
+
 function unauthorized(res, kind = 'api') {
   res.writeHead(401, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -58,4 +77,4 @@ function authWarning() {
   return '';
 }
 
-module.exports = { checkApi, checkAdmin, unauthorized, isLocal, authWarning };
+module.exports = { checkApi, checkAdmin, checkWeb, cookieToken, unauthorized, isLocal, authWarning };
