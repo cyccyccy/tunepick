@@ -23,9 +23,24 @@ async function route(req, res, method, pathname, url) {
   // ---------- 免鉴权 ----------
   if (pathname === '/api/health') return admin.health(res), true;
 
-  // ---------- Web 管理界面（HTTP Basic）----------
+  // ---------- 登录页（免鉴权）：写入 tp_token Cookie 后跳回主页 ----------
+  if (pathname === '/login' || pathname === '/login.html') {
+    web.route(req, res, '/login.html', url);
+    return true;
+  }
+
+  // ---------- Web 管理界面（Cookie 令牌 / Bearer / Basic 任一）----------
   if (!pathname.startsWith('/api/')) {
-    if (!auth.checkAdmin(req)) return auth.unauthorized(res, 'admin'), true;
+    if (!auth.checkWeb(req)) {
+      // 浏览器请求 → 跳登录页，避免原生 Basic 弹窗与前端令牌弹窗循环互踢
+      if ((req.headers.accept || '').includes('text/html')) {
+        res.writeHead(302, { Location: '/login', 'Cache-Control': 'no-cache' });
+        res.end();
+        return true;
+      }
+      auth.unauthorized(res, 'admin');
+      return true;
+    }
     return web.route(req, res, pathname, url);
   }
 
