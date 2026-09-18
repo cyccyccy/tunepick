@@ -9,13 +9,21 @@
   /* ---------------- token ---------------- */
   function getToken() { return localStorage.getItem('tp_token') || ''; }
   function setToken(v) { localStorage.setItem('tp_token', v); }
+  // 令牌同时写 Cookie：页面加载靠它鉴权，避免再弹 Basic 登录框（两者互踢会死循环）
+  function setTokenCookie(v) { document.cookie = 'tp_token=' + encodeURIComponent(v) + '; path=/; SameSite=Lax'; }
+  function clearTokenCookie() { document.cookie = 'tp_token=; path=/; Max-Age=0; SameSite=Lax'; }
 
   async function api(path, opts = {}) {
     const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
     const t = getToken();
     if (t) headers.Authorization = 'Bearer ' + t;
     const res = await fetch(path, Object.assign({}, opts, { headers }));
-    if (res.status === 401) { promptToken(); throw new Error('需要有效的访问令牌'); }
+    if (res.status === 401) {
+      // 令牌失效：清掉本地与 Cookie，回登录页重填（不再原地弹窗导致循环）
+      setToken(''); clearTokenCookie();
+      location.href = '/login';
+      throw new Error('需要有效的访问令牌');
+    }
     const ct = res.headers.get('content-type') || '';
     if (!ct.includes('application/json')) return res.text();
     return res.json();
@@ -23,7 +31,7 @@
 
   function promptToken() {
     const t = prompt('请输入 API 访问令牌（对应服务端的 AUTH_TOKEN）', getToken());
-    if (t !== null) { setToken(t); location.reload(); }
+    if (t !== null) { setToken(t); setTokenCookie(t.trim()); location.href = '/'; }
   }
 
   $('#btn-token').addEventListener('click', promptToken);
