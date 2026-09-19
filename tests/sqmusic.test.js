@@ -41,6 +41,8 @@ function createMockServer() {
     /** 置 true 后，下一个带鉴权的请求返回 401（模拟 token 失效） */
     expireOnce: false,
     lastDownloadBody: null,
+    lastTaskListBody: null,
+    taskListMethod: '',
     taskStatus: 'waiting',
     searchCalls: [],
   };
@@ -129,15 +131,51 @@ function createMockServer() {
         return send({ code: 200, data: { downloadStatus: state.taskStatus } });
       }
 
+      // ---- 版本探针（ping 用）----
+      if (u.pathname === '/api/config/version') {
+        return send({ code: 200, data: { version: '1.0.0' } });
+      }
+
       // ---- 任务列表 ----
+      // ⚠️ 真实服务只接受 POST；GET 返回 HTTP 200 + 业务码 500（实测行为，必须复刻）
       if (u.pathname === '/api/task/list') {
+        if (req.method !== 'POST') {
+          state.taskListMethod = req.method;
+          return send({ code: 500, msg: "Request method 'GET' not supported" });
+        }
+        let parsed = {};
+        try { parsed = JSON.parse(body || '{}'); } catch (_) { parsed = {}; }
+        state.lastTaskListBody = parsed;
+        if (parsed.pageIndex == null) {
+          return send({ code: 500, msg: 'getPageIndex() is null' });
+        }
+        // 字段名一律用真实服务的 download* 前缀，确保归一化逻辑真被测到
         return send({
           code: 200,
           data: {
+            total: 4,
+            size: 3,
+            current: 1,
+            pages: 1,
             records: [
-              { id: 't1', name: '晴天', artistName: '周杰伦', brType: 'KW_FLAC_2000', downloadStatus: state.taskStatus },
-              { id: 't2', name: 'Mojito', brType: 'KW_MP3_320', downloadStatus: 'success' },
-              { id: 't3', name: '坏歌', downloadStatus: 'error', message: '音源无版权' },
+              {
+                id: 4, downloadGid: '96765035', downloadTime: '2026-09-20 00:26:59',
+                downloadFile: '后来 - 刘若英', downloadMusicId: '96765035', downloadPlugName: 'kw',
+                downloadBrType: 'kw_flac_2000', downloadMusicname: '后来', downloadArtistname: '刘若英',
+                downloadAlbumname: '2020 刘若英陪你 献上录音专辑', downloadMsg: null,
+                downloadStatus: state.taskStatus === 'error' ? 'error' : state.taskStatus,
+                downloadUpdateTime: '2026-09-20 00:27:01', downloadBits: '2000,320,128',
+                downloadBrTypes: 'kw_flac_2000,kw_mp3_320,kw_mp3_128',
+              },
+              {
+                id: 5, downloadGid: '96765036', downloadMusicname: 'Mojito',
+                downloadArtistname: '周杰伦', downloadBrType: 'kw_mp3_320',
+                downloadAlbumname: 'Mojito', downloadStatus: 'success',
+              },
+              {
+                id: 6, downloadGid: '96765037', downloadMusicname: '坏歌',
+                downloadArtistname: '未知', downloadStatus: 'error', downloadMsg: '音源无版权',
+              },
             ],
           },
         });
@@ -251,16 +289,32 @@ function jsonOf(res) {
   try { await sq.download({ key: 'kw:9999' }); } catch (e) { cacheMiss = e; }
   check('未知 key 报 400 而非崩溃', cacheMiss && cacheMiss.status === 400, cacheMiss && cacheMiss.message);
 
-  console.log('\n== 4. 任务列表与进度 ==');
+  console.log('\n== 4. 任务列表与进度（真实服务契约：POST + download* 字段）==');
   const tl = await sq.tasks();
+  eq('用 POST 请求任务列表', state.taskListMethod, '');   // mock 仅在非 POST 时记录
+  eq('请求体带 pageIndex', state.lastTaskListBody && state.lastTaskListBody.pageIndex, 1);
+  eq('请求体带 pageSize', state.lastTaskListBody && state.lastTaskListBody.pageSize, 50);
   eq('任务条数', tl.items.length, 3);
+  eq('服务端 total 透传（非 items.length）', tl.total, 4);
   eq('waiting 归一', tl.items[0].status, 'waiting');
   eq('success 归一', tl.items[1].status, 'success');
   eq('error 归一', tl.items[2].status, 'error');
   eq('统计 waiting', tl.counts.waiting, 1);
   eq('统计 success', tl.counts.success, 1);
   eq('统计 error', tl.counts.error, 1);
-  eq('失败原因透传', tl.items[2].message, '音源无版权');
+
+  // 字段名映射：真实服务是 download* 前缀
+  eq('downloadMusicname → name', tl.items[0].name, '后来');
+  eq('downloadArtistname → artist', tl.items[0].artist, '刘若英');
+  eq('downloadAlbumname → album', tl.items[0].album, '2020 刘若英陪你 献上录音专辑');
+  eq('downloadBrType → brType', tl.items[0].brType, 'kw_flac_2000');
+  eq('失败原因透传（downloadMsg）', tl.items[2].message, '音源无版权');
+
+  // GET 打 /api/task/list：HTTP 200 包业务码 500，客户端必须如实抛错
+  let getErr = null;
+  try { await sq.getClient()._request('GET', '/api/task/list'); } catch (e) { getErr = e; }
+  check('GET 任务列表被识别为业务错误', !!getErr && getErr.code === 'business', getErr && getErr.message);
+  check('错误信息含服务端原文', !!getErr && /not supported/.test(getErr.message), getErr && getErr.message);
 
   console.log('\n== 5. token 过期自动重登 ==');
   state.expireOnce = true;
