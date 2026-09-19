@@ -16,6 +16,7 @@
     <a href="#/report" data-nav="report">质量报告</a>
     <a href="#/review" data-nav="review">标签审阅</a>
     <a href="#/library" data-nav="library">曲库浏览</a>
+    <a href="#/discover" data-nav="discover">搜歌下载</a>
     <a href="#/sources" data-nav="sources">数据源</a>
     <a href="#/llm" data-nav="llm">LLM 配置</a>
     <a href="#/logs" data-nav="logs">日志</a>
@@ -28,6 +29,8 @@
 
 <main id="view" class="view"></main>
 
+<!-- discover.js 必须先加载：首屏直接命中 #/discover 时，app.js 的 render() 会立即用到它 -->
+<script src="/discover.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>
