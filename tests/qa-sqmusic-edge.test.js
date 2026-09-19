@@ -108,9 +108,27 @@ function mockServer() {
         return send({ code: 200, data: { downloadStatus: 'waiting' } });
       }
       if (u.pathname === '/api/task/list') {
+        // 真实服务契约：只接受 POST，且 body 必须带 pageIndex
+        if (req.method !== 'POST') return send({ code: 500, msg: "Request method 'GET' not supported" });
+        let tp = {};
+        try { tp = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch (_) { tp = {}; }
+        if (tp.pageIndex == null) return send({ code: 500, msg: 'getPageIndex() is null' });
         if (state.mode === 'tasksArray') return send({ code: 200, data: [{ id: 't1', name: '晴天', downloadStatus: 'success' }] });
-        if (state.mode === 'tasksError') return send({ code: 200, data: { records: [{ id: 't9', name: '坏歌', downloadStatus: 'error', message: '无版权' }] } });
-        return send({ code: 200, data: { records: [] } });
+        if (state.mode === 'tasksError') {
+          // 字段名用真实服务的 download* 前缀
+          return send({
+            code: 200,
+            data: {
+              total: 1,
+              records: [{
+                id: 't9', downloadGid: '96765037', downloadMusicname: '坏歌',
+                downloadArtistname: '未知', downloadBrType: 'kw_mp3_320',
+                downloadStatus: 'error', downloadMsg: '无版权',
+              }],
+            },
+          });
+        }
+        return send({ code: 200, data: { total: 0, records: [] } });
       }
       return send({ code: 404, msg: 'nf' }, 404);
     });
