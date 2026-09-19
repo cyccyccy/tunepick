@@ -290,7 +290,9 @@ function rawRequest(urlStr, opts = {}) {
   const u = new URL(urlStr);
   const isHttps = u.protocol === 'https:';
   const port = Number(u.port) || (isHttps ? 443 : 80);
-  const proxy = proxyForUrl(urlStr);
+  // noProxy：LAN / docker 容器名 / 127.0.0.1 的内网地址一律直连。
+  // 这些目标若被 HTTP_PROXY 接管必然失败（代理不认识 sqmusic_main 这类内网主机名）。
+  const proxy = opts.noProxy ? null : proxyForUrl(urlStr);
   const started = Date.now();
 
   const mod = isHttps ? https : http;
