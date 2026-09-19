@@ -34,6 +34,8 @@ class ScanTask {
     this.src = null;
     this.listeners = new Set();
     this._stopFlag = false;
+    /** @type {Map<string, Set<string>>} protectExisting 模式下：曲目 id → 受保护字段集合 */
+    this._protect = new Map();
   }
 
   onProgress(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -65,7 +67,10 @@ class ScanTask {
 
   /**
    * 启动扫描
-   * @param {object} opts {mode, force, sampleSize, sources, wantLyrics, wantCover, useL3}
+   * @param {object} opts {mode, force, sampleSize, sources, wantLyrics, wantCover, useL3,
+   *                       protectExisting}
+   *        protectExisting=true：只补充空白字段，绝不覆盖已有值
+   *        （SqMusic 下载后的增量扫描用——它写好的歌手/专辑/封面/歌词不许被动）
    */
   async start(opts = {}) {
     if (this.state === STATE.RUNNING) {
@@ -90,6 +95,7 @@ class ScanTask {
     this.state = STATE.RUNNING;
     this.cursor = 0;
     this._stopFlag = false;
+    this._protect = new Map();
 
     log.info('扫描任务启动', { taskId, mode, source: this.src.kind });
     this._emit();
@@ -209,6 +215,7 @@ class ScanTask {
     // 与已有记录合并：保留 lockedFields 与人工修正
     const existing = db.byPath(entry.filePath);
     let track = fresh;
+    let protect = null;
     if (existing) {
       track = existing;
       for (const k of schema.FIELD_NAMES) {
@@ -221,6 +228,9 @@ class ScanTask {
       for (const k of ['fileSizeBytes', 'fileMtime', 'durationSec', 'bitrate', 'sampleRate', 'format']) {
         track[k] = fresh[k];
       }
+      // SqMusic 增量扫描保护：上游（SqMusic）已写进内嵌标签的字段一律视为锁定，
+      // 本轮只补充空白字段（流派/情绪/场景/年代走 L3），绝不覆盖歌手/专辑/封面/歌词。
+      if (opts.protectExisting) protect = collectProtected(track);
     }
 
     // ---------- 歌词：本地 .lrc > 内嵌 > 在线 ----------
@@ -245,8 +255,11 @@ class ScanTask {
           wantLyrics: !track.lyrics,
           wantCover: !track.coverId,
         });
-        if (res.fields && res.fields.length) {
-          const { accepted } = merge.mergeFields(track, res.fields);
+        const candidates = protect
+          ? (res.fields || []).filter((f) => !protect.has(f.field))
+          : (res.fields || []);
+        if (candidates.length) {
+          const { accepted } = merge.mergeFields(track, candidates);
           if (accepted.length) r.counters.l2Hit++;
           else r.counters.l2Miss++;
         } else {
@@ -292,6 +305,7 @@ class ScanTask {
     schema.finalize(track);
     db.upsert(track);
 
+    if (protect) this._protect.set(track.id, protect);
     if (opts.useL3 !== false) batchForL3.push(track);
     return track;
   }
@@ -303,8 +317,14 @@ class ScanTask {
     try {
       const results = await l3.inferBatch(batch);
       for (const t of batch) {
-        const raw = results.get(t.id);
+        let raw = results.get(t.id);
         if (!raw) continue;
+        // protectExisting：把受保护字段从 L3 结果里剔除，避免覆盖上游已写好的值
+        const protect = this._protect.get(t.id);
+        if (protect && protect.size) {
+          raw = { ...raw };
+          for (const f of protect) delete raw[f];
+        }
         l3.apply(t, raw);
         merge.recomputeConfidence(t);
         schema.finalize(t);
@@ -371,6 +391,28 @@ class ScanTask {
   }
 
   history() { return db.meta.runs || []; }
+}
+
+/**
+ * 收集「已有有效值的字段」——protectExisting 模式下的保护集合。
+ * 判定标准：非伪值 + 有来源。空白字段不保护，仍允许本轮补充。
+ * 用于 SqMusic 下载后的增量扫描：SqMusic 写进内嵌标签的歌手/专辑/歌词不得被改写，
+ * 只补充它给不了的流派 / 情绪 / 场景 / 年代（走 L3）。
+ * @param {object} track
+ * @returns {Set<string>}
+ */
+function collectProtected(track) {
+  const set = new Set();
+  const sm = track.sourceMap || {};
+  for (const k of schema.FIELD_NAMES) {
+    if (k === 'id' || k === 'createdAt' || k === 'updatedAt') continue;
+    const v = track[k];
+    if (v === '未知') continue;                // era 的默认值，不算有效值
+    if (schema.isPseudo(v)) continue;
+    if (!sm[k]) continue;
+    set.add(k);
+  }
+  return set;
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
