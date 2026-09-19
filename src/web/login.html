@@ -74,6 +74,9 @@
         cache: 'no-store',
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
+      // 关键：localStorage 和 Cookie 都要写——
+      // app.js 的 API 请求从 localStorage 取令牌，只写 Cookie 会导致 401 循环。
+      try { localStorage.setItem('tp_token', v); } catch (_) {}
       setCookie(v);
       location.href = '/';
     } catch (e) {
