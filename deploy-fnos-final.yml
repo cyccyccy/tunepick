@@ -1,0 +1,42 @@
+services:
+  tunepick:
+    image: "ghcr.io/cyccyccy/tunepick:latest"
+    # 每次点「构建」都先拉最新镜像（否则本地已有 latest 标签就不会更新）
+    pull_policy: always
+    container_name: "tunepick"
+    restart: "unless-stopped"
+    ports:
+      - "8090:8090"
+    volumes:
+      - "/vol1/@appshare/navidrome:/music:ro"
+      - "./data:/data"
+    environment:
+      - "TZ=Asia/Shanghai"
+      - "SOURCE_KIND=localfs"
+      - "MUSIC_DIR=/music"
+      - "DATA_DIR=/data"
+      - "AUTH_TOKEN=cyccyccy"
+      - "ADMIN_USER=admin"
+      - "ADMIN_PASSWORD=admin"
+      - "ONLINE_SOURCES=netease,caa"
+      - "ONLINE_ENABLED=true"
+      - "LLM_ENABLED=true"
+      - "LLM_PROVIDER=deepseek"
+      - "LLM_ENDPOINT=https://api.deepseek.com/chat/completions"
+      - "LLM_API_KEY=sk-451059082fc84395a9b20251a3dd5181"
+      - "LLM_MODEL=deepseek-flash"
+      - "LLM_MAX_TOKENS=16384"
+      # ---- SqMusic 在线搜歌下载（可选集成）----
+      # 未部署 SqMusic 时保持 SQ_ENABLED=false 即可：页面会显示启用引导，其余功能不受影响。
+      # SQ_BASE_URL：与 SqMusic 在同一 docker 网络时填容器名；SqMusic 跑在宿主上时改填
+      #              宿主 IP（如 http://192.168.2.107:8099），并确保容器能访问该地址。
+      - "SQ_ENABLED=false"
+      - "SQ_BASE_URL=http://sqmusic_main:8099"
+      - "SQ_USERNAME=admin"
+      - "SQ_PASSWORD=admin"
+      # 可用音源：kw(酷我) / kg(酷狗) / qq / netease
+      - "SQ_PLUGINS=kw,kg,qq,netease"
+      # 留空 = 由 SqMusic 自动选最高码率
+      - "SQ_BR_TYPE="
+      # 下载任务成功后自动触发一次增量扫描入库
+      - "SQ_AUTO_SCAN=true"
