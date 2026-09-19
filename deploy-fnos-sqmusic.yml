@@ -1,0 +1,48 @@
+services:
+  tunepick:
+    image: "crpi-18u9lmp0sqaxuesr.cn-shenzhen.personal.cr.aliyuncs.com/cyccyc-music/tunepick:latest"
+    pull_policy: always
+    container_name: "tunepick"
+    restart: "unless-stopped"
+    ports:
+      - "8091:8090"
+    volumes:
+      - "/vol1/@appshare/navidrome:/music:ro"
+      - "./data:/data"
+    environment:
+      - "TZ=Asia/Shanghai"
+      - "SOURCE_KIND=localfs"
+      - "MUSIC_DIR=/music"
+      - "DATA_DIR=/data"
+      - "AUTH_TOKEN=cyccyccy"
+      - "ADMIN_USER=admin"
+      - "ADMIN_PASSWORD=admin"
+      - "ONLINE_SOURCES=netease,caa"
+      - "ONLINE_ENABLED=true"
+      - "LLM_ENABLED=true"
+      - "LLM_PROVIDER=deepseek"
+      - "LLM_ENDPOINT=https://api.deepseek.com/chat/completions"
+      - "LLM_API_KEY=sk-451059082fc84395a9b20251a3dd5181"
+      - "LLM_MODEL=deepseek-flash"
+      - "LLM_MAX_TOKENS=16384"
+      # ---------- SqMusic 集成（在线搜歌下载）----------
+      - "SQ_ENABLED=true"
+      # 走 docker 内网直连 SqMusic 后端容器名，不暴露 8099 到宿主机
+      # 若两容器不在同一网络，改成 http://192.168.2.107:8099（需先给 sqmusic_main 加端口映射）
+      - "SQ_BASE_URL=http://sqmusic_main:8099"
+      - "SQ_USERNAME=admin"
+      - "SQ_PASSWORD=admin"
+      - "SQ_PLUGINS=kw,kg,qq,netease"
+      - "SQ_BR_TYPE="
+      - "SQ_AUTO_SCAN=true"
+      - "SQ_TIMEOUT_MS=15000"
+    networks:
+      - default
+      - sqmusic_sq-app-network
+
+networks:
+  # 已在 NAS 上确认存在：docker network ls | grep sq  →  sqmusic_sq-app-network
+  # 这是 SqMusic 项目的网络，必须声明为 external（不新建、直接加入），
+  # 否则 TunePick 解析不到容器名 sqmusic_main，搜歌会报 unreachable
+  sqmusic_sq-app-network:
+    external: true
