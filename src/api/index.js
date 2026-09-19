@@ -9,6 +9,7 @@ const admin = require('./admin');
 const auth = require('./auth');
 const stream = require('./stream');
 const web = require('../web/router');
+const sqmusic = require('./sqmusic');
 const { makeLogger } = require('../logger');
 const config = require('../config');
 
@@ -101,6 +102,13 @@ async function route(req, res, method, pathname, url) {
   if (P === '/api/llm/models') return admin.llmModels(res), true;
   if (P === '/api/llm/test' && method === 'POST') return admin.llmTest(req, res), true;
   if (P === '/api/tags/rerun-stale' && method === 'POST') return admin.rerunStale(req, res), true;
+
+  /* ===== SqMusic 在线搜歌下载（可选集成，未启用时返回 503 优雅降级）===== */
+  if (P === '/api/sqmusic/status') return sqmusic.status(res), true;
+  if (P === '/api/sqmusic/search' && method === 'POST') { await sqmusic.search(req, res); return true; }
+  if (P === '/api/sqmusic/download' && method === 'POST') { await sqmusic.download(req, res); return true; }
+  if (P === '/api/sqmusic/tasks') { await sqmusic.tasks(res); return true; }
+  if (P === '/api/sqmusic/test' && method === 'POST') { await sqmusic.ping(res); return true; }
 
   /* ===== 兼容层 ===== */
   if (P === '/api/library') return compat.library(res), true;
