@@ -27,22 +27,17 @@ services:
       - "LLM_MAX_TOKENS=16384"
       # ---------- SqMusic 集成（在线搜歌下载）----------
       - "SQ_ENABLED=true"
-      # 走 docker 内网直连 SqMusic 后端容器名，不暴露 8099 到宿主机
-      # 若两容器不在同一网络，改成 http://192.168.2.107:8099（需先给 sqmusic_main 加端口映射）
-      - "SQ_BASE_URL=http://sqmusic_main:8099"
+      # ⚠️ 实测：直连后端容器 http://sqmusic_main:8099 会被后端返回 HTTP 400
+      #     （后端只接受经它自己 nginx 转发过来的请求），
+      #     走前端代理端口 8996 实测登录+搜索全部正常。
+      #     若 NAS 内网 IP 变了（现在是 192.168.2.107），改这一行即可。
+      - "SQ_BASE_URL=http://192.168.2.107:8996"
       - "SQ_USERNAME=admin"
       - "SQ_PASSWORD=admin"
       - "SQ_PLUGINS=kw,kg,qq,netease"
       - "SQ_BR_TYPE="
       - "SQ_AUTO_SCAN=true"
       - "SQ_TIMEOUT_MS=15000"
-    networks:
-      - default
-      - sqmusic_sq-app-network
-
-networks:
-  # 已在 NAS 上确认存在：docker network ls | grep sq  →  sqmusic_sq-app-network
-  # 这是 SqMusic 项目的网络，必须声明为 external（不新建、直接加入），
-  # 否则 TunePick 解析不到容器名 sqmusic_main，搜歌会报 unreachable
-  sqmusic_sq-app-network:
-    external: true
+    # 说明：现在走宿主 IP + 前端代理端口（8996），
+    # 不再需要把 TunePick 加进 SqMusic 的 sqmusic_sq-app-network 网络，
+    # 少一层依赖、也不怕网络名对不上导致启动失败。
