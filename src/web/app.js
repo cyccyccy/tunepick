@@ -12,6 +12,17 @@
   // 令牌同时写 Cookie：页面加载靠它鉴权，避免再弹 Basic 登录框（两者互踢会死循环）
   function setTokenCookie(v) { document.cookie = 'tp_token=' + encodeURIComponent(v) + '; path=/; SameSite=Lax'; }
   function clearTokenCookie() { document.cookie = 'tp_token=; path=/; Max-Age=0; SameSite=Lax'; }
+  function getCookie(name) {
+    const m = new RegExp('(?:^|;\\s*)' + name + '=([^;]*)').exec(document.cookie || '');
+    if (!m) return '';
+    try { return decodeURIComponent(m[1]); } catch (_) { return m[1]; }
+  }
+  // 自愈：旧版登录页只写 Cookie 不写 localStorage，会导致 API 全 401 → 跳回登录页的循环。
+  // 启动时若 localStorage 为空而 Cookie 有令牌，用 Cookie 回填。
+  if (!getToken()) {
+    const ck = getCookie('tp_token');
+    if (ck) setToken(ck);
+  }
 
   async function api(path, opts = {}) {
     const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
