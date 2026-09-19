@@ -10,7 +10,9 @@
  *   登录  POST /api/config/login          {"username","password","device"} → data.tokenValue
  *   搜索  GET  /api/music/searchSong      ?plugName=&keyword=&pageSize=&pageIndex=
  *   下载  POST /api/download/downloadSong  body = 搜索结果整条 record + brType
- *   任务  GET  /api/task/list
+ *   任务  POST /api/task/list   body {"pageIndex":1,"pageSize":50}（⚠️ 不支持 GET）
+ *   探针  GET  /api/config/version
+ *   下载任务字段是 download* 前缀：downloadMusicname / downloadArtistname / downloadBrType / downloadStatus …
  *   鉴权  请求头 `sqmusic: <tokenValue>`（除登录外全部需要）
  *
  * ⚠️ 网络层只用 Node 内置 http/https（经 src/util/net.js 的 rawRequest）。
@@ -153,22 +155,30 @@ function normalizeSong(rec, plugName = '') {
   };
 }
 
-/** 下载任务归一化（/api/task/list 的字段命名各版本略有差异，这里做兼容） */
+/**
+ * 下载任务归一化
+ *
+ * ⚠️ 真实服务的字段名是 download* 前缀（实测 http://<host>/api/task/list）：
+ *    downloadMusicname / downloadArtistname / downloadAlbumname / downloadBrType /
+ *    downloadStatus / downloadMsg / downloadFile / downloadGid
+ * 早期版本猜测的 name/artist/album 等键保留在回退链尾部做兼容。
+ */
 function normalizeTask(raw) {
   if (!raw || typeof raw !== 'object') return null;
-  const id = String(raw.id || raw.taskId || raw.musicId || raw.songId || '').trim();
-  const name = String(raw.name || raw.songName || raw.musicName || raw.title || '').trim();
+  const id = String(raw.id || raw.downloadGid || raw.taskId || raw.musicId || raw.songId || '').trim();
+  const name = String(raw.name || raw.downloadMusicname || raw.downloadFile
+    || raw.songName || raw.musicName || raw.title || '').trim();
   if (!id && !name) return null;
   return {
     id: id || name,
     name,
-    artist: String(raw.artist || raw.artistName || '').trim(),
-    album: String(raw.album || raw.albumName || '').trim(),
-    brType: String(raw.brType || raw.br || '').trim(),
+    artist: String(raw.artist || raw.artistName || raw.downloadArtistname || '').trim(),
+    album: String(raw.album || raw.albumName || raw.downloadAlbumname || '').trim(),
+    brType: String(raw.brType || raw.downloadBrType || raw.br || '').trim(),
     status: normalizeStatus(raw.downloadStatus || raw.status || raw.state),
     progress: Number(raw.progress ?? raw.percent ?? 0) || 0,
     filePath: String(raw.filePath || raw.path || raw.savePath || '').trim(),
-    message: String(raw.message || raw.msg || raw.error || '').trim(),
+    message: String(raw.message || raw.downloadMsg || raw.msg || raw.error || '').trim(),
   };
 }
 
@@ -398,23 +408,37 @@ class SqMusicClient {
     return result;
   }
 
-  /** 下载任务列表与进度 */
-  async tasks() {
+  /**
+   * 下载任务列表与进度
+   *
+   * ⚠️ 实测：/api/task/list **只接受 POST**，GET 会返回
+   *    {"code":500,"msg":"Request method 'GET' not supported"}（HTTP 200 包业务错误）。
+   *    且 body 必须带 pageIndex/pageSize，缺 pageIndex 服务端会 NPE。
+   */
+  async tasks(opts = {}) {
     this.assertEnabled();
-    const body = await this._request('GET', '/api/task/list');
-    const raw = pickTaskList(body.data);
+    const body = await this._request('POST', '/api/task/list', {
+      body: {
+        pageIndex: opts.pageIndex || 1,
+        pageSize: opts.pageSize || 50,
+      },
+    });
+    const data = body.data || {};
+    const raw = pickTaskList(data);
     const items = raw.map(normalizeTask).filter(Boolean);
     const counts = { waiting: 0, downloading: 0, success: 0, error: 0 };
     for (const it of items) counts[it.status] = (counts[it.status] || 0) + 1;
-    return { items, counts, total: items.length };
+    const total = Number(data.total);
+    return { items, counts, total: Number.isFinite(total) ? total : items.length };
   }
 
-  /** 连通性自检（登录 + 拉一次任务列表） */
+  /** 连通性自检（登录 + 探一个只读端点） */
   async ping() {
     this.assertEnabled();
     const started = Date.now();
     await this.login(true);
-    await this._request('GET', '/api/task/list');
+    // /api/task/list 是 POST-only，不适合做探针；/api/config/version 是 GET 且实测 200
+    await this._request('GET', '/api/config/version');
     return { ok: true, latencyMs: Date.now() - started, baseUrl: this.baseUrl };
   }
 }
