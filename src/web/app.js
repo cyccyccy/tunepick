@@ -48,7 +48,7 @@
   $('#btn-token').addEventListener('click', promptToken);
 
   /* ---------------- 路由 ---------------- */
-  const ROUTES = { overview, scan, report, review, library, detail, sources, llm, logs };
+  const ROUTES = { overview, scan, report, review, library, detail, discover, sources, llm, logs };
   let pollTimer = null;
 
   function currentRoute() {
@@ -59,6 +59,8 @@
 
   function render() {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    // 搜歌页有自己的任务轮询定时器，切页面时必须一起停掉
+    if (window.TPDiscover && window.TPDiscover.stopPoll) window.TPDiscover.stopPoll();
     const { name, arg } = currentRoute();
     document.querySelectorAll('.nav a').forEach((a) => a.classList.toggle('active', a.dataset.nav === name));
     view().innerHTML = '<div class="empty">加载中…</div>';
@@ -318,6 +320,22 @@
         <td><span class="tag ${t.qualityLevel === 'high' ? 'ok' : ''}">${esc(t.qualityLevel || '')}</span></td>
         <td>${t.needReview ? '<span class="tag warn">待审阅</span>' : ''}</td>
       </tr>`).join('') || '<tr><td colspan="8" class="empty">无匹配结果</td></tr>';
+  }
+
+  /* ---------------- 搜歌下载（SqMusic） ----------------
+   * 页面实现放在 discover.js（本文件已近 500 行，拆出去更清晰）。
+   * 静态资源由 web/router.js 按 basename 提供，/discover.js 可正常加载。
+   */
+  async function discover() {
+    // 脚本可能还没执行完（首屏直接命中 #/discover），最多等 1s
+    for (let i = 0; i < 20 && !window.TPDiscover; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (!window.TPDiscover) {
+      view().innerHTML = '<div class="empty">搜歌模块未加载（discover.js 缺失）</div>';
+      return;
+    }
+    return window.TPDiscover.render(view(), { api, esc });
   }
 
   async function detail(arg) {
