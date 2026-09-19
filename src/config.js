@@ -108,6 +108,23 @@ const config = {
   COVER_CACHE_MAX_MB: int('COVER_CACHE_MAX_MB', 500),
   STREAM_RANGE_ENABLED: bool('STREAM_RANGE_ENABLED', true),
 
+  // ---- SqMusic 在线搜歌下载（可选集成，默认关闭）----
+  // ⚠️ 总开关是 SQ_ENABLED：false 时 /api/sqmusic/* 全部返回 503「未启用」，
+  //    前端显示引导页，不会报错崩溃。
+  SQ_ENABLED: bool('SQ_ENABLED', false),
+  // 同 docker 网络时填容器名（如 http://sqmusic_main:8099）；
+  // SqMusic 跑在宿主、TunePick 在 docker 里时填宿主 IP（如 http://192.168.2.107:8099）
+  SQ_BASE_URL: str('SQ_BASE_URL', 'http://sqmusic_main:8099'),
+  SQ_USERNAME: str('SQ_USERNAME', 'admin'),
+  SQ_PASSWORD: str('SQ_PASSWORD', 'admin'),
+  // 可用音源：kw(酷我) / kg(酷狗) / qq / netease
+  SQ_PLUGINS: list('SQ_PLUGINS', ['kw', 'kg', 'qq', 'netease']),
+  // 默认码率；留空 = 由 SqMusic 自动选最高（推荐）
+  SQ_BR_TYPE: str('SQ_BR_TYPE', ''),
+  // 下载任务成功后自动触发一次增量扫描入库
+  SQ_AUTO_SCAN: bool('SQ_AUTO_SCAN', true),
+  SQ_TIMEOUT_MS: int('SQ_TIMEOUT_MS', 15000),
+
   // ---- L3 LLM ----
   LLM_ENABLED: bool('LLM_ENABLED', true),
   LLM_PROVIDER: str('LLM_PROVIDER', 'deepseek'),
