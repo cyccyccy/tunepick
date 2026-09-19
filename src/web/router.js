@@ -17,6 +17,12 @@ const MIME = {
   '.json': 'application/json; charset=utf-8',
 };
 
+/**
+ * ⚠️ 必须返回 true：src/server.js 用 `route()` 的返回值判断「是否已处理」。
+ * Node 22 的 `res.end()` 返回 undefined，若这里不显式返回真值，
+ * server.js 会在响应已发出后再 writeHead(404)，抛 ERR_HTTP_HEADERS_SENT
+ * ——表现为每个页面/静态资源请求都刷一条「请求处理异常」ERROR 日志。
+ */
 function send(res, body, type, status = 200) {
   res.writeHead(status, {
     'Content-Type': type,
@@ -24,6 +30,7 @@ function send(res, body, type, status = 200) {
     'Cache-Control': 'no-cache',
   });
   res.end(body);
+  return true;
 }
 
 function route(req, res, pathname) {
