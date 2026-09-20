@@ -97,6 +97,16 @@ const BEARER = { authorization: 'Bearer testtoken', accept: 'application/json' }
     disc.text.includes('window.TPDiscover') && disc.text.includes('render'),
     '长度=' + disc.text.length);
   ok('discover.js 内容非空且非 index.html', disc.text.length > 1000, '长度=' + disc.text.length);
+  // 新增四项能力的痕迹必须真的出现在下发到浏览器的文件里（不是只在源码里）
+  ok('discover.js 含下载目录展示（/api/sqmusic/dir）',
+    /\/api\/sqmusic\/dir/.test(disc.text) && disc.text.includes('下载目录'), '未匹配');
+  ok('discover.js 含试听（/api/sqmusic/preview）',
+    /\/api\/sqmusic\/preview/.test(disc.text) && disc.text.includes('试听'), '未匹配');
+  ok('discover.js 含已下载列表（/api/sqmusic/downloaded）',
+    /\/api\/sqmusic\/downloaded/.test(disc.text) && disc.text.includes('已下载'), '未匹配');
+  // 诚实性：SqMusic 无真实进度，页面不得画进度条
+  ok('discover.js 不含百分比进度条（无真实进度，不撒谎）',
+    !/class="progress"/.test(disc.text), '出现了 progress 进度条');
 
   const appJs = await request('/app.js', { headers: BEARER });
   ok('GET /app.js → 200', appJs.status === 200, String(appJs.status));
@@ -142,6 +152,10 @@ const BEARER = { authorization: 'Bearer testtoken', accept: 'application/json' }
     ['POST', '/api/sqmusic/download'],
     ['GET', '/api/sqmusic/tasks'],
     ['POST', '/api/sqmusic/test'],
+    // 新增三项（下载目录 / 试听 / 已下载）：同样必须 Bearer 鉴权
+    ['GET', '/api/sqmusic/dir'],
+    ['POST', '/api/sqmusic/preview'],
+    ['GET', '/api/sqmusic/downloaded'],
   ];
   for (const [m, p] of endpoints) {
     const anon = await request(p, { method: m, headers: { accept: 'application/json' } });
@@ -165,7 +179,9 @@ const BEARER = { authorization: 'Bearer testtoken', accept: 'application/json' }
   ok(`status.enabled === ${SQ_ON}`,
     st.json && st.json.status && st.json.status.enabled === SQ_ON, JSON.stringify(st.json && st.json.status));
 
-  for (const [m, p] of endpoints.filter(([m2, p2]) => p2 !== '/api/sqmusic/status')) {
+  // 只跑原有四项的降级期望；新增三项的降级形态各不相同，单独在 3b 里断言
+  const LEGACY_ENDPOINTS = ['/api/sqmusic/search', '/api/sqmusic/download', '/api/sqmusic/tasks', '/api/sqmusic/test'];
+  for (const [m, p] of endpoints.filter(([, p2]) => LEGACY_ENDPOINTS.includes(p2))) {
     // download 会先校验本地缓存 key（冷缓存 → 400 cache-miss），
     // 这本就是「不联网也能拒绝非法请求」的正确顺序，期望值单独写
     const isDownload = p === '/api/sqmusic/download';
@@ -188,6 +204,42 @@ const BEARER = { authorization: 'Bearer testtoken', accept: 'application/json' }
     if (!SQ_ON && !isDownload) {
       ok(`${m} ${p} 提示文案含「未启用 SqMusic」`,
         r.json && /未启用 SqMusic/.test(r.json.error || ''), JSON.stringify(r.json && r.json.error));
+    }
+  }
+
+  /* =====================================================================
+   * 3b. 新增三端点的降级形态（各自不同，不能套用统一的 502/503 期望）
+   *     dir      ：读不到目录也要 200 + error 文案，绝不崩页面
+   *     preview  ：冷缓存先 400 cache-miss（不联网就能拒非法请求）
+   *     downloaded：走 task/list，不可达时 502 unreachable
+   * ===================================================================== */
+  console.log('\n== 3b. 新增端点（dir / preview / downloaded）降级行为 ==');
+  const newOnes = [
+    ['GET', '/api/sqmusic/dir'],
+    ['POST', '/api/sqmusic/preview'],
+    ['GET', '/api/sqmusic/downloaded'],
+  ];
+  for (const [m, p] of newOnes) {
+    const r = await request(p, {
+      method: m,
+      headers: Object.assign({ 'content-type': 'application/json' }, BEARER),
+      body: m === 'POST' ? JSON.stringify({ key: 'x' }) : null,
+    });
+    const brief = String(r.status) + ' ' + (r.text || '').slice(0, 140);
+    if (!SQ_ON) {
+      ok(`${m} ${p} 未启用 → 503 disabled`,
+        r.status === 503 && r.json && r.json.code === 'disabled', brief);
+      continue;
+    }
+    if (p === '/api/sqmusic/dir') {
+      ok('dir 不可达 → 仍 200 且带 error 文案（不崩页面）',
+        r.status === 200 && r.json && r.json.ok === true && r.json.downloadPath === '' && !!r.json.error, brief);
+    } else if (p === '/api/sqmusic/preview') {
+      ok('preview 冷缓存 → 400 cache-miss',
+        r.status === 400 && r.json && r.json.code === 'cache-miss', brief);
+    } else {
+      ok('downloaded 不可达 → 502 unreachable',
+        r.status === 502 && r.json && r.json.code === 'unreachable', brief);
     }
   }
 
