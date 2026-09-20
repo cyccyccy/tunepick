@@ -45,6 +45,25 @@ async function route(req, res, method, pathname, url) {
     return web.route(req, res, pathname, url);
   }
 
+  /* ===== /api/stream/* ：全站唯一放宽鉴权的一处 =====
+   * ⚠️ 必须排在下面「统一的 checkApi」之前，否则 Cookie 请求会先被 401 拦掉，
+   *    这里的放宽就成了死代码（实测踩过）。
+   * 规则：Bearer 有效 **或** Cookie tp_token 有效 → 放行；两者都无效 → 仍然 401。
+   * 原因：浏览器 <audio src="/api/stream/xxx"> 只会带同域 Cookie，
+   *       不会附加 Authorization 头，沿用 checkApi（只认 Bearer）播放必然 401。
+   * 其余 /api/* 一律仍走下面的 checkApi，行为完全不变。
+   */
+  {
+    const m = /^\/api\/stream\/(.+)$/.exec(pathname);
+    if (m) {
+      const cookieToken = auth.cookieToken(req);
+      const cookieOk = !!(config.AUTH_TOKEN && cookieToken && cookieToken === config.AUTH_TOKEN);
+      if (!auth.checkApi(req) && !cookieOk) return auth.unauthorized(res, 'api'), true;
+      await stream.handle(req, res, decodeURIComponent(m[1]));
+      return true;
+    }
+  }
+
   // ---------- API（Bearer）----------
   if (!auth.checkApi(req)) return auth.unauthorized(res, 'api'), true;
 
@@ -108,6 +127,9 @@ async function route(req, res, method, pathname, url) {
   if (P === '/api/sqmusic/search' && method === 'POST') { await sqmusic.search(req, res); return true; }
   if (P === '/api/sqmusic/download' && method === 'POST') { await sqmusic.download(req, res); return true; }
   if (P === '/api/sqmusic/tasks') { await sqmusic.tasks(res); return true; }
+  if (P === '/api/sqmusic/dir') { await sqmusic.dir(res); return true; }
+  if (P === '/api/sqmusic/preview' && method === 'POST') { await sqmusic.preview(req, res); return true; }
+  if (P === '/api/sqmusic/downloaded') { await sqmusic.downloaded(res, url); return true; }
   if (P === '/api/sqmusic/test' && method === 'POST') { await sqmusic.ping(res); return true; }
 
   /* ===== 兼容层 ===== */
@@ -156,11 +178,6 @@ async function route(req, res, method, pathname, url) {
     const m = /^\/api\/sources\/([^/]+)\/test$/.exec(P);
     if (m && method === 'POST') { await admin.testSource(req, res, decodeURIComponent(m[1])); return true; }
   }
-  {
-    const m = /^\/api\/stream\/(.+)$/.exec(P);
-    if (m) { await stream.handle(req, res, decodeURIComponent(m[1])); return true; }
-  }
-
   return json(res, { ok: false, error: `接口不存在：${method} ${P}`, hint: '检查请求路径与 HTTP 方法' }, 404), true;
 }
 
