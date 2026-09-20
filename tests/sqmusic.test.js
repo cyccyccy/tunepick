@@ -45,6 +45,13 @@ function createMockServer() {
     taskListMethod: '',
     taskStatus: 'waiting',
     searchCalls: [],
+    /** 新增：配置列表（下载目录） */
+    getConfigCalls: 0,
+    configFail: false,
+    /** 新增：试听直链 */
+    previewCalls: 0,
+    lastPreviewBody: null,
+    previewNoUrl: false,
   };
 
   const server = http.createServer((req, res) => {
@@ -136,6 +143,37 @@ function createMockServer() {
         return send({ code: 200, data: { version: '1.0.0' } });
       }
 
+      // ---- 配置列表（下载目录 system.download.path）----
+      if (u.pathname === '/api/config/getConfigList') {
+        state.getConfigCalls++;
+        if (state.configFail) return send({ code: 500, msg: '配置服务异常' });
+        // 真实服务返回的是配置数组，下载目录只是其中一条
+        return send({
+          code: 200,
+          data: [
+            { configKey: 'system.other.flag', configValue: '1' },
+            { configKey: 'system.download.path', configValue: '/vol1/@appshare/navidrome/music' },
+          ],
+        });
+      }
+
+      // ---- 试听直链（带时间签名，前端只短缓存）----
+      if (u.pathname === '/api/music/getDownloadUrl' && req.method === 'POST') {
+        let parsed2 = {};
+        try { parsed2 = JSON.parse(body || '{}'); } catch (_) { parsed2 = {}; }
+        state.previewCalls++;
+        state.lastPreviewBody = parsed2;
+        if (state.previewNoUrl) return send({ code: 200, data: { bit: 'flac' } });
+        return send({
+          code: 200,
+          data: {
+            url: 'https://dl.example.com/1001.flac?sign=abc',
+            bit: 'flac',
+            plugBrTypeId: parsed2.brType || 'KW_FLAC_2000',
+          },
+        });
+      }
+
       // ---- 任务列表 ----
       // ⚠️ 真实服务只接受 POST；GET 返回 HTTP 200 + 业务码 500（实测行为，必须复刻）
       if (u.pathname === '/api/task/list') {
@@ -150,14 +188,7 @@ function createMockServer() {
           return send({ code: 500, msg: 'getPageIndex() is null' });
         }
         // 字段名一律用真实服务的 download* 前缀，确保归一化逻辑真被测到
-        return send({
-          code: 200,
-          data: {
-            total: 4,
-            size: 3,
-            current: 1,
-            pages: 1,
-            records: [
+        const records = [
               {
                 id: 4, downloadGid: '96765035', downloadTime: '2026-09-20 00:26:59',
                 downloadFile: '后来 - 刘若英', downloadMusicId: '96765035', downloadPlugName: 'kw',
@@ -176,7 +207,19 @@ function createMockServer() {
                 id: 6, downloadGid: '96765037', downloadMusicname: '坏歌',
                 downloadArtistname: '未知', downloadStatus: 'error', downloadMsg: '音源无版权',
               },
-            ],
+            ];
+        // 真实服务支持 downloadStatus 过滤（传 'success' 即「已下载」列表），复刻该行为
+        const filtered = parsed.downloadStatus
+          ? records.filter((r) => r.downloadStatus === parsed.downloadStatus)
+          : records;
+        return send({
+          code: 200,
+          data: {
+            total: parsed.downloadStatus ? filtered.length : 4,
+            size: filtered.length,
+            current: 1,
+            pages: 1,
+            records: filtered,
           },
         });
       }
@@ -310,6 +353,25 @@ function jsonOf(res) {
   eq('downloadBrType → brType', tl.items[0].brType, 'kw_flac_2000');
   eq('失败原因透传（downloadMsg）', tl.items[2].message, '音源无版权');
 
+  // 防御性回归：真实记录里**不存在** name/artist/album/brType 这些键，
+  // 因此若 SqMusic 某版本新增了同名键（语义可能完全不同），也必须仍以 download* 为准。
+  // 取值顺序约定：download* 真实字段在前，早期猜测字段只在尾部兜底。
+  const mixed = sq.normalizeTask({
+    id: 'x1',
+    name: '错的名字（猜测字段）', downloadMusicname: '后来的我们',
+    artist: '错的歌手', downloadArtistname: '刘若英',
+    album: '错的专辑', downloadAlbumname: '真实专辑',
+    brType: 'KW_MP3_128', downloadBrType: 'kw_flac_2000',
+    downloadFile: '后来 - 刘若英', downloadStatus: 'success',
+  });
+  eq('同时有 name 键时必须以 downloadMusicname 为准', mixed.name, '后来的我们');
+  eq('同时有 artist 键时必须以 downloadArtistname 为准', mixed.artist, '刘若英');
+  eq('同时有 album 键时必须以 downloadAlbumname 为准', mixed.album, '真实专辑');
+  eq('同时有 brType 键时必须以 downloadBrType 为准', mixed.brType, 'kw_flac_2000');
+  // downloadFile 是「歌名 - 歌手」拼接串，只能当 downloadMusicname 缺失时的兜底
+  const onlyFile = sq.normalizeTask({ downloadFile: '稻香 - 周杰伦', downloadStatus: 'success' });
+  eq('缺 downloadMusicname 时才用 downloadFile 兜底', onlyFile.name, '稻香 - 周杰伦');
+
   // GET 打 /api/task/list：HTTP 200 包业务码 500，客户端必须如实抛错
   let getErr = null;
   try { await sq.getClient()._request('GET', '/api/task/list'); } catch (e) { getErr = e; }
@@ -402,6 +464,159 @@ function jsonOf(res) {
   const again = sqApi2.maybeAutoScan(many);
   check('超出上限后淘汰最早的一半（集合有界）',
     again === 'pending' || /^run_/.test(String(again)), '实际=' + String(again));
+
+  console.log('\n== 10. 下载目录（config/getConfigList → system.download.path）==');
+  config.SQ_ENABLED = true;
+  sq.resetClient();
+  const cfg = await sq.configInfo();
+  eq('读到下载目录', cfg.downloadPath, '/vol1/@appshare/navidrome/music');
+  eq('第一次读打了一次接口', state.getConfigCalls, 1);
+  await sq.configInfo();
+  eq('10 分钟缓存生效，不再重复打接口', state.getConfigCalls, 1);
+  await sq.getClient().getConfig(true);
+  eq('force=true 时重新读取', state.getConfigCalls, 2);
+
+  const resDir = fakeRes();
+  await sqApi.dir(resDir);
+  const dirBody = jsonOf(resDir);
+  eq('dir 接口 200', resDir.status, 200);
+  eq('dir 返回下载目录', dirBody && dirBody.downloadPath, '/vol1/@appshare/navidrome/music');
+  eq('dir 无错误文案', dirBody && dirBody.error, '');
+
+  // 读不到目录：不能抛异常、不能让页面崩，只能降级成「未能读取下载目录」
+  state.configFail = true;
+  sq.resetClient();
+  const cfgFail = await sq.getClient().getConfig(true);
+  eq('读不到时 downloadPath 为空', cfgFail.downloadPath, '');
+  check('读不到时给出去原因', !!cfgFail.error, cfgFail.error);
+  const resDirFail = fakeRes();
+  await sqApi.dir(resDirFail);
+  const dirFailBody = jsonOf(resDirFail);
+  eq('dir 接口仍 200（不崩页面）', resDirFail.status, 200);
+  check('dir 接口带回 error 文案', !!dirFailBody && !!dirFailBody.error, dirFailBody && dirFailBody.error);
+  state.configFail = false;
+  sq.resetClient();
+
+  console.log('\n== 11. 试听直链（music/getDownloadUrl）==');
+  await sq.search('晴天', { plugName: 'kw' });     // 刷新搜索缓存，保证 key 没过期
+  const pv = await sq.preview({ key: 'kw:1001' });
+  eq('拿到播放直链', pv.url, 'https://dl.example.com/1001.flac?sign=abc');
+  eq('未指定码率时自动挑最高（实测 128 档 Content-Type 异常）', pv.brType, 'KW_FLAC_2000');
+  eq('直链带歌名', pv.name, '晴天');
+  eq('直链带歌手', pv.artist, '周杰伦');
+  eq('取链打了一次接口', state.previewCalls, 1);
+
+  const pv2 = await sq.preview({ key: 'kw:1001' });
+  eq('30s 内复用缓存，不再打接口', state.previewCalls, 1);
+  eq('缓存返回同一条直链', pv2.url, pv.url);
+
+  const pv3 = await sq.preview({ key: 'kw:1001', brType: 'KW_MP3_320' });
+  eq('指定码率时透传', pv3.brType, 'KW_MP3_320');
+  check('请求体带 brType', state.lastPreviewBody && state.lastPreviewBody.brType === 'KW_MP3_320',
+    JSON.stringify(state.lastPreviewBody));
+  eq('码率不同 → 不同缓存键 → 再打一次接口', state.previewCalls, 2);
+
+  let pvMiss = null;
+  try { await sq.preview({ key: 'kw:9999' }); } catch (e) { pvMiss = e; }
+  check('搜索结果已过期 → 400 cache-miss', pvMiss && pvMiss.status === 400, pvMiss && pvMiss.message);
+
+  state.previewNoUrl = true;
+  let pvNoUrl = null;
+  try { await sq.preview({ key: 'kw:1001', brType: 'KW_MP3_128' }); } catch (e) { pvNoUrl = e; }
+  check('SqMusic 未返回直链 → 502', pvNoUrl && pvNoUrl.status === 502, pvNoUrl && pvNoUrl.message);
+  state.previewNoUrl = false;
+
+  const resPv = fakeRes();
+  await sqApi.preview(reqWithBody({ key: 'kw:1001' }), resPv);
+  const pvBody = jsonOf(resPv);
+  eq('preview 接口 200', resPv.status, 200);
+  eq('preview 接口返回 url', pvBody && pvBody.url, pv.url);
+
+  console.log('\n== 12. 已下载列表（task/list + downloadStatus=success）==');
+  const dlList = await sq.downloaded();
+  check('已下载列表全是 success',
+    dlList.items.length > 0 && dlList.items.every((x) => x.status === 'success'),
+    JSON.stringify(dlList.items.map((x) => x.status)));
+  eq('请求体带 downloadStatus=success', state.lastTaskListBody && state.lastTaskListBody.downloadStatus, 'success');
+  eq('默认每页 50', state.lastTaskListBody && state.lastTaskListBody.pageSize, 50);
+  await sq.downloaded({ pageIndex: 2, pageSize: 10 });
+  eq('分页参数透传 pageIndex', state.lastTaskListBody && state.lastTaskListBody.pageIndex, 2);
+  eq('分页参数透传 pageSize', state.lastTaskListBody && state.lastTaskListBody.pageSize, 10);
+
+  const resDlList = fakeRes();
+  await sqApi.downloaded(resDlList, new URL('http://x/api/sqmusic/downloaded?pageIndex=1&pageSize=50'));
+  const dlBody = jsonOf(resDlList);
+  eq('downloaded 接口 200', resDlList.status, 200);
+  check('downloaded 有条目', !!dlBody && (dlBody.items || []).length > 0, JSON.stringify(dlBody));
+  eq('downloaded 带回下载目录', dlBody && dlBody.downloadPath, '/vol1/@appshare/navidrome/music');
+  check('每项都带 inLibrary / trackId / filePath / fileSizeBytes',
+    !!dlBody && dlBody.items.every((x) => 'inLibrary' in x && 'trackId' in x && 'filePath' in x && 'fileSizeBytes' in x),
+    JSON.stringify(dlBody && dlBody.items));
+  eq('曲库为空时判未入库', dlBody && dlBody.items[0].inLibrary, false);
+
+  // 曲库配对：歌名必须对上，双方都有歌手时歌手也要对上，宁可判「未入库」也不瞎猜
+  const dbPath = require.resolve('../src/store/db');
+  const realDb = require(dbPath);
+  const origFilter = realDb.filter;
+  realDb.filter = () => ({
+    items: [{
+      id: 'T1', title: '后来', cleanTitle: '后来', artist: '刘若英', cleanArtist: '刘若英',
+      filePath: '/music/后来.mp3', fileSizeBytes: 123456,
+    }],
+  });
+  const hitTrack = sqApi.matchTrackInLibrary('后来', '刘若英');
+  check('歌名+歌手对得上 → 命中', !!hitTrack && hitTrack.id === 'T1', JSON.stringify(hitTrack));
+  check('歌手对不上不误配', sqApi.matchTrackInLibrary('后来', '周杰伦') === null, '误配了');
+  check('歌名对不上不误配', sqApi.matchTrackInLibrary('稻香', '刘若英') === null, '误配了');
+  const resDl2 = fakeRes();
+  await sqApi.downloaded(resDl2, new URL('http://x/api/sqmusic/downloaded'));
+  const dlBody2 = jsonOf(resDl2);
+  const hitRow = dlBody2 && dlBody2.items.find((x) => x.name === '后来');
+  eq('已入库曲目带 trackId', hitRow && hitRow.trackId, 'T1');
+  eq('已入库曲目带真实体积（真值）', hitRow && hitRow.fileSizeBytes, 123456);
+  eq('已入库标记', hitRow && hitRow.inLibrary, true);
+  realDb.filter = origFilter;
+
+  console.log('\n== 13. 新增接口仍必须 Bearer 鉴权 ==');
+  for (const [p, m] of [['/api/sqmusic/dir', 'GET'], ['/api/sqmusic/downloaded', 'GET'], ['/api/sqmusic/preview', 'POST']]) {
+    const out = fakeRes();
+    const r = { headers: { accept: 'application/json' }, method: m, socket: { remoteAddress: '192.168.2.1' }, url: p };
+    await route(r, out, m, p, new URL('http://x' + p));
+    eq(`无 token → 401（${m} ${p}）`, out.status, 401);
+  }
+  const outDirOk = fakeRes();
+  const rDirOk = { headers: { authorization: 'Bearer testtoken' }, method: 'GET', socket: { remoteAddress: '192.168.2.1' }, url: '/api/sqmusic/dir' };
+  await route(rDirOk, outDirOk, 'GET', '/api/sqmusic/dir', new URL('http://x/api/sqmusic/dir'));
+  eq('有 token → 200（dir）', outDirOk.status, 200);
+  const dirOkBody = jsonOf(outDirOk);
+  eq('dir 内容正确', dirOkBody && dirOkBody.downloadPath, '/vol1/@appshare/navidrome/music');
+
+  console.log('\n== 14. /api/stream/*：Cookie 或 Bearer 任一有效即放行 ==');
+  const mkStreamReq = (headers) => ({
+    headers, method: 'GET', socket: { remoteAddress: '192.168.2.1' }, url: '/api/stream/T1',
+  });
+  const outStreamNone = fakeRes();
+  await route(mkStreamReq({}), outStreamNone, 'GET', '/api/stream/T1', new URL('http://x/api/stream/T1'));
+  eq('无 token 无 cookie → 401', outStreamNone.status, 401);
+
+  const outStreamCookie = fakeRes();
+  await route(mkStreamReq({ cookie: 'tp_token=testtoken' }), outStreamCookie, 'GET', '/api/stream/T1', new URL('http://x/api/stream/T1'));
+  check('Cookie 有效 → 不再 401（<audio> 只能带 Cookie）', outStreamCookie.status !== 401,
+    '实际=' + outStreamCookie.status);
+
+  const outStreamBad = fakeRes();
+  await route(mkStreamReq({ cookie: 'tp_token=wrong' }), outStreamBad, 'GET', '/api/stream/T1', new URL('http://x/api/stream/T1'));
+  eq('Cookie 错误 → 仍 401', outStreamBad.status, 401);
+
+  const outStreamBearer = fakeRes();
+  await route(mkStreamReq({ authorization: 'Bearer testtoken' }), outStreamBearer, 'GET', '/api/stream/T1', new URL('http://x/api/stream/T1'));
+  check('Bearer 有效 → 不再 401', outStreamBearer.status !== 401, '实际=' + outStreamBearer.status);
+
+  // 放宽仅限 /api/stream/ 前缀：其余 /api/* 仍只认 Bearer，Cookie 不能顶替
+  const outOther = fakeRes();
+  const rOther = { headers: { cookie: 'tp_token=testtoken', accept: 'application/json' }, method: 'GET', socket: { remoteAddress: '192.168.2.1' }, url: '/api/sqmusic/status' };
+  await route(rOther, outOther, 'GET', '/api/sqmusic/status', new URL('http://x/api/sqmusic/status'));
+  eq('Cookie 不能顶替 Bearer（/api/sqmusic/status 仍 401）', outOther.status, 401);
 
   server.close();
   console.log('\n通过 ' + pass + ' 项，失败 ' + fail + ' 项');
