@@ -58,6 +58,10 @@ function mockServer() {
     token: 'tok-fixed',
     lastDownloadBody: null,
     reqCount: 0,
+    /** 记录 /api/task/list 实际收到的 method 与 body（新契约必须是 POST + pageIndex/pageSize） */
+    lastTaskList: null,
+    getConfigCalls: 0,
+    previewCalls: 0,
   };
   const server = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
@@ -109,11 +113,12 @@ function mockServer() {
       }
       if (u.pathname === '/api/task/list') {
         // 真实服务契约：只接受 POST，且 body 必须带 pageIndex
-        if (req.method !== 'POST') return send({ code: 500, msg: "Request method 'GET' not supported" });
         let tp = {};
         try { tp = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch (_) { tp = {}; }
+        state.lastTaskList = { method: req.method, body: tp };   // QA：记录真实 method / body 用于断言
+        if (req.method !== 'POST') return send({ code: 500, msg: "Request method 'GET' not supported" });
         if (tp.pageIndex == null) return send({ code: 500, msg: 'getPageIndex() is null' });
-        if (state.mode === 'tasksArray') return send({ code: 200, data: [{ id: 't1', name: '晴天', downloadStatus: 'success' }] });
+        if (state.mode === 'tasksArray') return send({ code: 200, data: [{ id: 't1', downloadMusicname: '晴天', downloadStatus: 'success' }] });
         if (state.mode === 'tasksError') {
           // 字段名用真实服务的 download* 前缀
           return send({
@@ -129,6 +134,50 @@ function mockServer() {
           });
         }
         return send({ code: 200, data: { total: 0, records: [] } });
+      }
+
+      // ---- QA 新增：下载目录 / 试听直链（新增端点，重点压「上游返回垃圾」时的优雅降级）----
+      if (u.pathname === '/api/config/getConfigList') {
+        state.getConfigCalls++;
+        if (state.mode === 'cfgHttp500') {
+          state.mode = 'normal';
+          return send({ code: 500, msg: '配置服务炸了' }, 503);
+        }
+        if (state.mode === 'cfgHtml') {
+          state.mode = 'normal';
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          return res.end('<html><body>502 Bad Gateway</body></html>');
+        }
+        if (state.mode === 'cfgNoKey') {
+          return send({ code: 200, data: { records: [{ configKey: 'other.thing', configValue: 'x' }] } });
+        }
+        return send({
+          code: 200,
+          data: { records: [{ configKey: 'system.download.path', configValue: '/vol1/music' }] },
+        });
+      }
+
+      if (u.pathname === '/api/music/getDownloadUrl') {
+        state.previewCalls++;
+        let pp = {};
+        try { pp = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); } catch (_) { pp = {}; }
+        state.lastPreviewBody = pp;
+        if (state.mode === 'pvHttp500') { state.mode = 'normal'; return send({ code: 500, msg: 'boom' }, 500); }
+        if (state.mode === 'pvHtml') {
+          state.mode = 'normal';
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          return res.end('<html>nginx 502</html>');
+        }
+        if (state.mode === 'pvBiz') { state.mode = 'normal'; return send({ code: 500, msg: '操作频繁' }, 200); }
+        if (state.mode === 'pvNoUrl') return send({ code: 200, data: { bit: '320' } });   // 无 url
+        return send({
+          code: 200,
+          data: {
+            url: `https://dl.example.com/${pp.brType || 'auto'}.flac?sign=1`,
+            bit: '2000',
+            plugBrTypeId: pp.brType || 'KW_FLAC_2000',
+          },
+        });
       }
       return send({ code: 404, msg: 'nf' }, 404);
     });
@@ -292,6 +341,15 @@ function freePort() {
     state.mode = 'tasksArray';
     const t1 = await c.tasks();
     ok('data 为裸数组也能解析', t1.items.length === 1 && t1.items[0].id === 't1', JSON.stringify(t1.items));
+    ok('未知上游字段时必须存在 download* 映射路径', t1.items[0].name === '晴天', JSON.stringify(t1.items[0]));
+
+    // 新契约：POST + body 带 pageIndex/pageSize（GET 会被上游判为业务错误）
+    ok('任务列表必须用 POST（GET 会被上游拒绝）',
+      state.lastTaskList && state.lastTaskList.method === 'POST',
+      JSON.stringify(state.lastTaskList));
+    ok('body 必须带 pageIndex',
+      state.lastTaskList && state.lastTaskList.body.pageIndex != null,
+      JSON.stringify(state.lastTaskList && state.lastTaskList.body));
 
     state.mode = 'tasksError';
     const t2 = await c.tasks();
@@ -299,6 +357,11 @@ function freePort() {
       t2.items[0].status === 'error', JSON.stringify(t2.items[0]));
     ok('失败原因透传', /无版权/.test(t2.items[0].message), t2.items[0].message);
     ok('counts.error = 1', t2.counts.error === 1, JSON.stringify(t2.counts));
+    // ⚠️ 真实服务字段名是 download*，这里逐字段钉住映射，防止回退到猜测字段还能「假绿」
+    ok('downloadMusicname → name', t2.items[0].name === '坏歌', t2.items[0].name);
+    ok('downloadArtistname → artist', t2.items[0].artist === '未知', t2.items[0].artist);
+    ok('downloadBrType → brType', t2.items[0].brType === 'kw_mp3_320', t2.items[0].brType);
+    ok('服务端 total 优先于 items.length', t2.total === 1, String(t2.total));
 
     state.mode = 'normal';
     const c2 = mkClient(port);
@@ -405,6 +468,85 @@ function freePort() {
     // _processOne 在未传 protectExisting 时不得产生保护集合
     const freshAbove = src.indexOf('if (opts.protectExisting) protect = collectProtected(track);');
     ok('保护集合只在 opts.protectExisting 为真时生成', freshAbove > -1, '未找到 opt-in 判定行');
+  }
+
+  /* =====================================================================
+   * L. 新增端点（下载目录 / 试听 / 已下载）的失败降级
+   *    核心拷问：上游返回「垃圾」时，绝不能把不可观测的状态当成功，
+   *    也绝不能让页面崩掉。
+   * ===================================================================== */
+  console.log('\n== L. 新增端点：上游返回垃圾时的降级 ==');
+  {
+    const c = mkClient(port);
+
+    // ---------- L1. 下载目录：读不到必须降级成 error，不抛、不崩 ----------
+    const good = await c.getConfig(true);
+    ok('正常读到下载目录', good.downloadPath === '/vol1/music', JSON.stringify(good));
+    const callsAfterGood = state.getConfigCalls;
+    await c.getConfig();
+    ok('10 分钟缓存生效（不打第二次）', state.getConfigCalls === callsAfterGood,
+      String(state.getConfigCalls));
+
+    state.mode = 'cfgHttp500';
+    const e1 = await c.getConfig(true);
+    ok('上游 503 → 降级为「读不到」而不抛异常', e1.downloadPath === '' && !!e1.error, JSON.stringify(e1));
+
+    state.mode = 'cfgHtml';
+    const e2 = await c.getConfig(true);
+    ok('上游返回 HTML → 同样降级（不得当成功）', e2.downloadPath === '' && !!e2.error, JSON.stringify(e2));
+
+    state.mode = 'cfgNoKey';
+    const e3 = await c.getConfig(true);
+    ok('上游 200 但没有 system.download.path → 空路径 + 明确文案',
+      e3.downloadPath === '' && /system\.download\.path|下载路径/.test(e3.error), JSON.stringify(e3));
+
+    // ---------- L2. 试听直链：必须校验 HTTP 状态码 + 业务码 + url 存在 ----------
+    await c.search('晴天');                       // 填充缓存，拿到合法 key
+    const key = (await c.search('晴天')).items[0].key;
+    ok('搜索缓存可用（key 形如 kw:1001）', /^kw:1001$/.test(key), key);
+
+    const pv = await c.preview({ key });
+    ok('正常拿到直链', /^https:\/\//.test(pv.url), JSON.stringify(pv));
+    ok('未指定码率时挑选最高档', pv.brType === 'KW_FLAC_2000', pv.brType);
+
+    state.mode = 'pvHttp500';
+    const p1 = await expectThrow(() => c.preview({ key, brType: 'KW_MP3_320' }));
+    ok('取链 HTTP 500 → 抛错（不得当成功）', p1.threw && p1.err.status === 502, p1.detail);
+
+    state.mode = 'pvHtml';
+    const p2 = await expectThrow(() => c.preview({ key, brType: 'KW_MP3_128' }));
+    ok('取链返回 HTML → 抛 parse（不得把 HTML 当 JSON）', p2.threw && p2.err.code === 'parse', p2.detail);
+
+    state.mode = 'pvBiz';
+    const p3 = await expectThrow(() => c.preview({ key, brType: 'KW_FLAC_1000' }));
+    ok('取链 HTTP 200 但 code!=200 → 抛错（关键陷阱点）',
+      p3.threw && p3.err.status === 502, p3.detail);
+
+    state.mode = 'pvNoUrl';
+    const p4 = await expectThrow(() => c.preview({ key, brType: 'KW_MP3_192' }));
+    ok('上游没给 url → no-url（不得返回空串假装成功）',
+      p4.threw && p4.err.code === 'no-url', p4.detail);
+
+    const p5 = await expectThrow(() => c.preview({ key: 'kw:9999' }));
+    ok('缓存过期/未知 key → 400 cache-miss', p5.threw && p5.err.status === 400, p5.detail);
+    const p6 = await expectThrow(() => c.preview({}));
+    ok('缺 key → 400 bad-request', p6.threw && p6.err.status === 400, p6.detail);
+
+    // ---------- L3. 已下载列表 = 任务列表按 downloadStatus=success 过滤 ----------
+    state.mode = 'tasksArray';
+    const d1 = await c.downloaded();
+    ok('downloaded 有条目', d1.items.length === 1, JSON.stringify(d1.items));
+    ok('请求体带 downloadStatus=success',
+      state.lastTaskList && state.lastTaskList.body.downloadStatus === 'success',
+      JSON.stringify(state.lastTaskList && state.lastTaskList.body));
+    ok('每页条数默认 50',
+      state.lastTaskList && state.lastTaskList.body.pageSize === 50,
+      JSON.stringify(state.lastTaskList && state.lastTaskList.body));
+    await c.downloaded({ pageIndex: 3, pageSize: 7 });
+    ok('分页参数透传',
+      state.lastTaskList.body.pageIndex === 3 && state.lastTaskList.body.pageSize === 7,
+      JSON.stringify(state.lastTaskList.body));
+    state.mode = 'normal';
   }
 
   server.close();
