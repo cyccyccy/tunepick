@@ -33,6 +33,19 @@ const SEARCH_CACHE_TTL_MS = 30 * 60 * 1000;
 /** key → { record, at } */
 const searchCache = new Map();
 
+/** 下载目录缓存（SqMusic 配置很少变，10 分钟足够；resetClient 时会清掉） */
+const CONFIG_CACHE_TTL_MS = 10 * 60 * 1000;
+let dirCache = { v: '', at: 0 };
+
+/**
+ * 试听直链缓存 —— 只缓存 30 秒。
+ * ⚠️ 实测：getDownloadUrl 返回的 URL 中间段 hex 随时间递增（如 .../6aafee1b/... →
+ *    .../6aafefa6/...），是带时间签名的临时地址，长缓存必然失效。
+ *    同一次播放会话内复用即可，绝不要跨会话缓存。
+ */
+const PREVIEW_CACHE_TTL_MS = 30 * 1000;
+const previewCache = new Map();
+
 /** 音源中文名（仅用于界面展示） */
 const PLUGIN_LABELS = {
   kw: '酷我',
@@ -159,26 +172,46 @@ function normalizeSong(rec, plugName = '') {
  * 下载任务归一化
  *
  * ⚠️ 真实服务的字段名是 download* 前缀（实测 http://<host>/api/task/list）：
- *    downloadMusicname / downloadArtistname / downloadAlbumname / downloadBrType /
- *    downloadStatus / downloadMsg / downloadFile / downloadGid
- * 早期版本猜测的 name/artist/album 等键保留在回退链尾部做兼容。
+ *    id / downloadGid / downloadTime / downloadFile / downloadMusicId / downloadPlugName /
+ *    downloadBrType / downloadMusicname / downloadArtistname / downloadAlbumname /
+ *    downloadMsg / downloadMusicInfo / downloadStatus / downloadUpdateTime / …
+ *    —— 真实任务记录里**不存在** name / artist / album / brType 这些键。
+ *
+ * ⚠️ 取值顺序约定（不要改回去）：
+ *    **download* 真实字段在前，早期猜测字段只在尾部兜底。**
+ *    以前把 name/artist/album/brType 写在最前面，只是因为真实响应里恰好没有同名键才没出错；
+ *    一旦 SqMusic 某版本新增了这些键（哪怕语义不同），我们会静默取到错值。
+ *    唯一例外：`downloadFile` 的值是「后来 - 刘若英」这种「歌名 - 歌手」拼接串，
+ *    只能当兜底，必须排在 downloadMusicname 之后。
  */
 function normalizeTask(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.id || raw.downloadGid || raw.taskId || raw.musicId || raw.songId || '').trim();
-  const name = String(raw.name || raw.downloadMusicname || raw.downloadFile
-    || raw.songName || raw.musicName || raw.title || '').trim();
+  // 真实字段在前，猜测字段兜底（顺序约定见函数头注释，勿改）
+  const name = String(raw.downloadMusicname || raw.downloadFile
+    || raw.name || raw.songName || raw.musicName || raw.title || '').trim();
   if (!id && !name) return null;
+  const brType = String(raw.downloadBrType || raw.brType || raw.br || '').trim();
+  const durationSec = durationSecFromTask(raw);
   return {
     id: id || name,
     name,
-    artist: String(raw.artist || raw.artistName || raw.downloadArtistname || '').trim(),
-    album: String(raw.album || raw.albumName || raw.downloadAlbumname || '').trim(),
-    brType: String(raw.brType || raw.downloadBrType || raw.br || '').trim(),
+    artist: String(raw.downloadArtistname || raw.artistName || raw.artist || '').trim(),
+    album: String(raw.downloadAlbumname || raw.albumName || raw.album || '').trim(),
+    brType,
     status: normalizeStatus(raw.downloadStatus || raw.status || raw.state),
     progress: Number(raw.progress ?? raw.percent ?? 0) || 0,
+    // ⚠️ filePath/path/savePath 三个键在真实任务记录里都不存在（真实字段清单见函数头注释），
+    //    仅作兼容占位；前端看到的文件路径来自 API 层曲库配对后回填的 filePath。
     filePath: String(raw.filePath || raw.path || raw.savePath || '').trim(),
-    message: String(raw.message || raw.downloadMsg || raw.msg || raw.error || '').trim(),
+    message: String(raw.downloadMsg || raw.message || raw.msg || raw.error || '').trim(),
+    // ---- 算「耗时 / 速度 / 估算大小」需要的字段，原样透传不做加工 ----
+    startedAt: String(raw.downloadTime || raw.startedAt || '').trim(),
+    updatedAt: String(raw.downloadUpdateTime || raw.updatedAt || '').trim(),
+    bitrateKbps: bitrateFromBrType(brType),
+    plugName: String(raw.downloadPlugName || raw.plugName || '').trim(),
+    durationSec,
+    durationMs: durationSec * 1000,
   };
 }
 
@@ -190,6 +223,46 @@ function pickTaskList(data) {
     if (Array.isArray(data[k])) return data[k];
   }
   return [];
+}
+
+/**
+ * 从 /api/config/getConfigList 的响应里取出配置数组。
+ * 兼容多种形态：顶层数组 / {data:[…]} / {data:{records:[…]}} —— 不写死某一种。
+ */
+function pickConfigList(body) {
+  if (Array.isArray(body)) return body;
+  if (!body || typeof body !== 'object') return [];
+  if (Array.isArray(body.data)) return body.data;
+  const KEYS = ['records', 'list', 'items', 'content', 'configs'];
+  const d = body.data;
+  if (d && typeof d === 'object') {
+    for (const k of KEYS) if (Array.isArray(d[k])) return d[k];
+  }
+  for (const k of KEYS) if (Array.isArray(body[k])) return body[k];
+  return [];
+}
+
+/** 从 brType（如 KW_FLAC_2000 / kw_mp3_320）末尾解析码率 kbps，解析不出为 0 */
+function bitrateFromBrType(brType) {
+  const m = /(\d{3,4})\s*$/.exec(String(brType == null ? '' : brType).trim());
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+/**
+ * 从任务的 downloadMusicInfo 里取时长（秒）。
+ * downloadMusicInfo 在真实服务里是 **JSON 字符串**，需先解析。
+ * 实测其中 duration 是秒（"309"），而搜索 record 的 duration 是毫秒（"309000"），
+ * 因此大于 600 的值按毫秒处理（600 秒 = 10 分钟，正常单曲不会超过）。
+ */
+function durationSecFromTask(raw) {
+  let info = raw && raw.downloadMusicInfo;
+  if (typeof info === 'string') {
+    try { info = JSON.parse(info); } catch (_) { info = null; }
+  }
+  if (!info || typeof info !== 'object') return 0;
+  const n = Number(info.duration ?? info.durationSec ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n > 600 ? Math.round(n / 1000) : Math.round(n);
 }
 
 /* ==========================================================================
@@ -417,12 +490,15 @@ class SqMusicClient {
    */
   async tasks(opts = {}) {
     this.assertEnabled();
-    const body = await this._request('POST', '/api/task/list', {
-      body: {
-        pageIndex: opts.pageIndex || 1,
-        pageSize: opts.pageSize || 50,
-      },
-    });
+    const reqBody = {
+      pageIndex: opts.pageIndex || 1,
+      pageSize: opts.pageSize || 50,
+    };
+    // 实测：task/list 支持 downloadStatus 过滤（传 'success' 即「已下载」列表）
+    const status = String(opts.status || '').trim();
+    if (status) reqBody.downloadStatus = status;
+
+    const body = await this._request('POST', '/api/task/list', { body: reqBody });
     const data = body.data || {};
     const raw = pickTaskList(data);
     const items = raw.map(normalizeTask).filter(Boolean);
@@ -430,6 +506,84 @@ class SqMusicClient {
     for (const it of items) counts[it.status] = (counts[it.status] || 0) + 1;
     const total = Number(data.total);
     return { items, counts, total: Number.isFinite(total) ? total : items.length };
+  }
+
+  /** 已下载列表 —— 就是 task/list 按 downloadStatus=success 过滤 */
+  async downloaded(opts = {}) {
+    return this.tasks({ ...opts, status: 'success' });
+  }
+
+  /**
+   * 读取 SqMusic 的下载保存目录
+   * @param {boolean} [force] 跳过缓存强制重读
+   * @returns {Promise<{downloadPath:string, error:string}>} 失败不抛，error 给原因
+   */
+  async getConfig(force = false) {
+    this.assertEnabled();
+    if (!force && dirCache.v && Date.now() - dirCache.at < CONFIG_CACHE_TTL_MS) {
+      return { downloadPath: dirCache.v, error: '' };
+    }
+    try {
+      const body = await this._request('GET', '/api/config/getConfigList');
+      const list = pickConfigList(body);
+      let path = '';
+      for (const c of list) {
+        if (!c || typeof c !== 'object') continue;
+        if (String(c.configKey || '').trim() === 'system.download.path') {
+          path = String(c.configValue || '').trim();
+          break;
+        }
+      }
+      dirCache = { v: path, at: Date.now() };
+      if (!path) {
+        return { downloadPath: '', error: 'SqMusic 未返回下载路径（system.download.path）' };
+      }
+      return { downloadPath: path, error: '' };
+    } catch (e) {
+      // 读不到目录不能让页面崩掉：交给前端显示「未能读取下载目录」
+      log.warn('读取 SqMusic 下载目录失败', { error: e && e.message });
+      return { downloadPath: '', error: (e && e.message) || '读取失败' };
+    }
+  }
+
+  /**
+   * 取试听直链
+   * @param {{key:string, brType?:string}} payload
+   * @returns {Promise<{url:string, brType:string, bit:string, plugBrTypeId:string, name:string, artist:string, key:string}>}
+   */
+  async preview(payload = {}) {
+    this.assertEnabled();
+    const key = String(payload.key || '').trim();
+    if (!key) throw new SqError('缺少试听参数：需要 key', 400, 'bad-request');
+    const record = getCache(key);
+    if (!record) throw new SqError('搜索结果已过期，请重新搜索后再试听', 400, 'cache-miss');
+
+    // 码率：入参 → 自动挑最高（实测最高档是 FLAC/320，Content-Type 正常；
+    // 不要降级到 128 —— 实测 128 档返回 application/octet-stream，浏览器不一定播）
+    const brType = String(payload.brType || '').trim() || bestBrType(record.brTypes) || '';
+
+    const ck = `${key}|${brType}`;
+    const hit = previewCache.get(ck);
+    if (hit && Date.now() - hit.at < PREVIEW_CACHE_TTL_MS) return { ...hit.data };
+
+    const body = await this._request('POST', '/api/music/getDownloadUrl', {
+      body: brType ? { ...record, brType } : { ...record },
+    });
+    const d = body.data || {};
+    const url = String(d.url || '').trim();
+    if (!url) throw new SqError('未取得播放地址（SqMusic 未返回直链）', 502, 'no-url');
+
+    const data = {
+      url,
+      brType: String(d.plugBrTypeId || brType || '').trim(),
+      bit: String(d.bit || '').trim(),
+      plugBrTypeId: String(d.plugBrTypeId || '').trim(),
+      name: String(record.name || '').trim(),
+      artist: toStrArray(record.artistName).join(' / '),
+      key,
+    };
+    previewCache.set(ck, { data, at: Date.now() });
+    return { ...data };
   }
 
   /** 连通性自检（登录 + 探一个只读端点） */
@@ -454,9 +608,10 @@ function getClient() {
   return client;
 }
 
-/** 丢弃单例（配置变更后 / 测试用） */
+/** 丢弃单例（配置变更后 / 测试用）；顺带清掉下载目录缓存 */
 function resetClient() {
   client = null;
+  dirCache = { v: '', at: 0 };
   return getClient();
 }
 
@@ -484,10 +639,16 @@ module.exports = {
   normalizeTask,
   normalizeStatus,
   bestBrType,
+  bitrateFromBrType,
+  pickConfigList,
+  durationSecFromTask,
   PLUGIN_LABELS,
   // 便捷入口：直接用单例
   search: (kw, opts) => getClient().search(kw, opts),
   download: (payload) => getClient().download(payload),
-  tasks: () => getClient().tasks(),
+  tasks: (opts) => getClient().tasks(opts || {}),
+  downloaded: (opts) => getClient().downloaded(opts || {}),
+  preview: (payload) => getClient().preview(payload),
+  configInfo: () => getClient().getConfig(),
   ping: () => getClient().ping(),
 };
