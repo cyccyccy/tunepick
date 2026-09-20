@@ -549,6 +549,57 @@ function freePort() {
     state.mode = 'normal';
   }
 
+  /* =====================================================================
+   * M. 字段取值顺序：download* 真实字段必须压过早期猜测字段
+   *    背景：真实 /api/task/list 记录里不存在 name/artist/album/brType/message 这些键，
+   *    把它们写在最前面时「恰好没出错」。一旦 SqMusic 新增同名键就会静默取到错值。
+   *    这里用「毒丸载荷」（同名字段同时给一个错值和一个真值）把顺序钉死。
+   * ===================================================================== */
+  console.log('\n== M. 取值顺序：download* 压过猜测字段 ==');
+  {
+    const poison = {
+      id: 'real-id-1', downloadGid: 'gid-1',
+      // ↓ 这是错值（模拟 SqMusic 未来新增的同名键）
+      name: '错歌名', artist: '错歌手', album: '错专辑', brType: '错码率', message: '错原因',
+      // ↓ 这是真值（真实服务字段）
+      downloadMusicname: '真歌名', downloadArtistname: '真歌手',
+      downloadAlbumname: '真专辑', downloadBrType: 'kw_flac_2000', downloadMsg: '真原因',
+      downloadStatus: 'error',
+    };
+    const nt = sq.normalizeTask(poison);
+    ok('downloadMusicname 压过 name', nt.name === '真歌名', nt.name);
+    ok('downloadArtistname 压过 artist', nt.artist === '真歌手', nt.artist);
+    ok('downloadAlbumname 压过 album', nt.album === '真专辑', nt.album);
+    ok('downloadBrType 压过 brType', nt.brType === 'kw_flac_2000', nt.brType);
+    ok('downloadMsg 压过 message', nt.message === '真原因', nt.message);
+    ok('downloadStatus 仍然正确归一', nt.status === 'error', nt.status);
+    ok('downloadGid 兜底仍在 id 之后生效', nt.id === 'real-id-1', nt.id);
+
+    // ⚠️ 真实记录里 id 与 downloadGid 同时存在，但语义不同（已由 curl 原始响应证实）：
+    //    id = 任务表自增行号（1/2/3/4，唯一且单调递增）；downloadGid = 曲目 id（如 96765035）。
+    //    必须取 id —— 同一首歌可以重复下载多次，downloadGid 会重复，用它判重会漏掉「新完成」。
+    const rowAndGid = sq.normalizeTask({ id: 4, downloadGid: '96765035', downloadMusicname: '后来', downloadStatus: 'success' });
+    ok('id 优先于 downloadGid（id 是任务行号，才是正确的判重键）',
+      rowAndGid.id === '4', rowAndGid.id);
+    ok('downloadGid 不被当作 id 使用（否则重复下载同一首歌判重会漏）',
+      rowAndGid.id !== '96765035', rowAndGid.id);
+
+    // downloadFile 是「歌名 - 歌手」拼接串，只能兜底，必须排在 downloadMusicname 之后
+    const onlyFile = sq.normalizeTask({ downloadMusicname: '', downloadFile: '后来 - 刘若英' });
+    ok('downloadMusicname 缺失时才兜底到 downloadFile',
+      onlyFile.name === '后来 - 刘若英', onlyFile.name);
+    const both = sq.normalizeTask({ downloadMusicname: '晴天', downloadFile: '晴天 - 周杰伦' });
+    ok('两者同时存在时以 downloadMusicname 为准', both.name === '晴天', both.name);
+
+    // filePath：真实任务记录里没有该字段，必须是空串而不是污染值
+    const noPath = sq.normalizeTask({ downloadMusicname: '晴天' });
+    ok('无文件路径字段时 filePath 为空串（不编造）', noPath.filePath === '', JSON.stringify(noPath.filePath));
+
+    // id 优先真实主键，downloadGid 兜底
+    const gidOnly = sq.normalizeTask({ downloadGid: 'gid-2', downloadMusicname: '后来' });
+    ok('无 id 时 downloadGid 兜底', gidOnly.id === 'gid-2', gidOnly.id);
+  }
+
   server.close();
   console.log('\n通过 ' + pass + ' 项，失败 ' + fail + ' 项');
   if (failures.length) {
