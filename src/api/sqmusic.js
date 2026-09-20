@@ -132,6 +132,38 @@ async function download(req, res) {
   }
 }
 
+/** GET /api/sqmusic/dir —— SqMusic 的下载保存目录（读不到只给 error，不崩页面） */
+async function dir(res) {
+  try {
+    const r = await sq.configInfo();
+    return json(res, { ok: true, downloadPath: r.downloadPath || '', error: r.error || '' });
+  } catch (e) {
+    return fail(res, e, 'dir');
+  }
+}
+
+/**
+ * POST /api/sqmusic/preview —— 试听直链
+ * ⚠️ 直链带时间签名会过期，服务端只缓存 30s；前端失效时重新点一次即可。
+ */
+async function preview(req, res) {
+  try {
+    const body = await readJson(req);
+    const r = await sq.preview({ key: body.key, brType: body.brType });
+    return json(res, {
+      ok: true,
+      url: r.url,
+      brType: r.brType,
+      bit: r.bit,
+      name: r.name,
+      artist: r.artist,
+      key: r.key,
+    });
+  } catch (e) {
+    return fail(res, e, 'preview');
+  }
+}
+
 /**
  * 下载任务列表 / 进度
  * 顺带承担「下载完成后自动增量扫描」的触发点：
@@ -151,6 +183,92 @@ async function tasks(res) {
     });
   } catch (e) {
     return fail(res, e, 'tasks');
+  }
+}
+
+/* ==========================================================================
+ * 已下载列表：SqMusic 的成功任务 × TunePick 曲库配对
+ * ========================================================================== */
+
+/** 归一化歌名/歌手用于比较：小写 + 去空格 + 剔除括号内容（《后来的我们》这类副信息） */
+function normName(s) {
+  return String(s == null ? '' : s)
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[（(][^）)]*[）)]/g, '');
+}
+
+/** 相等或互相包含即认为对得上 */
+function namesMatch(a, b) {
+  if (!a || !b) return false;
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+/**
+ * 在 TunePick 曲库里找与「已下载任务条目」对应的曲目。
+ *
+ * 复用现成的 db.filter（按 title+cleanTitle+artist+cleanArtist+album 做 includes 匹配），
+ * 不另写一套遍历。
+ * 防误配：歌名必须先对上；双方都有歌手时歌手也要对得上，否则宁可判「未入库」不瞎猜。
+ *
+ * @returns {object|null} 命中的曲目对象（含 filePath / fileSizeBytes），未命中 null
+ */
+function matchTrackInLibrary(name, artist) {
+  const nName = normName(name);
+  const nArtist = normName(artist);
+  if (!nName) return null;
+
+  let db;
+  try { db = require('../store/db'); } catch (e) { return null; }
+  if (!db || typeof db.filter !== 'function') return null;
+
+  const r = db.filter({ q: name, limit: 50 });
+  for (const t of (r && r.items) || []) {
+    const candName = normName(t.cleanTitle || t.title);
+    if (!namesMatch(candName, nName)) continue;
+    const candArtist = normName(t.cleanArtist || t.artist);
+    if (nArtist && candArtist && !namesMatch(candArtist, nArtist)) continue;
+    return t;
+  }
+  return null;
+}
+
+/**
+ * GET /api/sqmusic/downloaded —— 已下载列表
+ * query: pageIndex(默认 1) / pageSize(默认 50)
+ */
+async function downloaded(res, url) {
+  try {
+    const sp = (url && url.searchParams) || new URLSearchParams();
+    const pageIndex = parseInt(sp.get('pageIndex') || '1', 10) || 1;
+    const pageSize = parseInt(sp.get('pageSize') || '50', 10) || 50;
+
+    const r = await sq.downloaded({ pageIndex, pageSize });
+    const cfg = await sq.configInfo().catch(() => ({ downloadPath: '', error: '' }));
+
+    const items = (r.items || []).map((it) => {
+      const t = matchTrackInLibrary(it.name, it.artist);
+      return {
+        ...it,
+        trackId: t ? t.id : '',
+        filePath: t ? (t.filePath || '') : '',
+        fileSizeBytes: t ? (t.fileSizeBytes || 0) : 0,
+        inLibrary: !!t,
+      };
+    });
+
+    return json(res, {
+      ok: true,
+      items,
+      total: r.total,
+      counts: r.counts,
+      pageIndex,
+      pageSize,
+      downloadPath: cfg.downloadPath || '',
+      downloadPathError: cfg.error || '',
+    });
+  } catch (e) {
+    return fail(res, e, 'downloaded');
   }
 }
 
@@ -215,4 +333,20 @@ async function ping(res) {
   }
 }
 
-module.exports = { status, search, download, tasks, ping, json, readJson, maybeAutoScan, AUTO_SCAN_COOLDOWN_MS };
+module.exports = {
+  status,
+  search,
+  download,
+  tasks,
+  dir,
+  preview,
+  downloaded,
+  ping,
+  json,
+  readJson,
+  maybeAutoScan,
+  matchTrackInLibrary,
+  normName,
+  namesMatch,
+  AUTO_SCAN_COOLDOWN_MS,
+};
