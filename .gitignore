@@ -29,6 +29,10 @@ prototype/*.log
 .tmp-qa-v1/
 .tmp-qa-v1sq/
 
+# 一次性探针/校验脚本与抓取的样本（用完即删，不入库）
+.tmp-*
+tools/api-probe-report.json
+
 # 依赖
 node_modules/
 
