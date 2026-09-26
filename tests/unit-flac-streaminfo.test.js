@@ -26,6 +26,19 @@
  *      —— 守门：12 / 13 / 14 / 17 字节（加保护前会算出 44096 / 0 / 0 / 270 这些"看起来合法"的值）
  *      —— 哨兵：8 / 10 字节（加保护前本来就不解析，绿不代表有鉴别力）
  *
+ * ⚠️ 构造 fixture 的陷阱（都是真踩过的，改本文件时先读一遍）：
+ *   1. Vorbis 打包顺序必须是 vendorLen(4) + vendor + count(4) + entries(len + 串)。
+ *      写成「Buffer.alloc(4) + 带长度前缀的 vendor」会让 count 读成垃圾 → 标题全丢，
+ *      表现为「解析成功但字段为空」，很容易误判成解析器的问题。
+ *   2. 魔法串是 'vorbis'（6 字节）。写成 'vorb' 会**静默跳过分支**
+ *      —— 表现为「居然没抛异常」，极易被误读成「这条路径是安全的」。
+ *      所以：**下任何负面结论之前，先确认分支真的进了**。
+ *   3. 超过 32bit 的整数一律不许用位移：JS 的位移量取模 32，
+ *      `x << 32` 等价于 `x << 0`、`x >>> 35` 等价于 `x >>> 3`。
+ *      接高 4 位只能用乘法（见 src/tags/flac.js 的 totalSamples）。
+ *   4. 判「守门」还是「哨兵」，标准是**把实现改回旧写法后这条会不会红**；
+ *      不会红的只能标哨兵，别混进守门里充数。
+ *
  * 运行：node tests/unit-flac-streaminfo.test.js
  */
 
@@ -290,6 +303,158 @@ console.log('\nF. 截断 STREAMINFO 的长度防御');
     }
   }
 }
+
+/* ==========================================================================
+ * G. PICTURE / OGG 的健壮性：坏块不得连带丢失已解析的真实数据
+ *
+ * 背景（QA 独立发现 + 二次确认）：`parseFlacPicture` 原本没有任何边界检查，
+ * 一旦某个长度字段"说谎"（如 descLen 声明 1000 但 body 只有几十字节），
+ * readUInt32BE 会抛 RangeError，异常穿过 parseFlac 抵达 tags/index.js 的整体
+ * try/catch —— **连累已经在它之前解析好的 STREAMINFO 时长一起作废**，
+ * 落库成 durationSec=0。这个症状与本轮修复的偏移 bug **完全一致**，
+ * 上线后会被误判成「修复没生效」。所以必须进来不会因为一片垃圾封面丢整份标签。
+ *
+ * 判别力：**把 src/tags/flac.js 的 per-block try/catch 与边界检查同时撤掉，
+ * 下面 G2/G3/G4/G5 会立刻红**（ParamError 上抛 → 字段全空）。
+ * ========================================================================== */
+
+/** 拼 Vorbis Comment body：vendorLen(4) + vendor + count(4) + [len(4) + 串] */
+function makeVorbisBody(entries) {
+  const vendor = Buffer.from('tunepick', 'utf8');
+  const head = Buffer.alloc(4 + vendor.length + 4);
+  head.writeUInt32LE(vendor.length, 0);
+  vendor.copy(head, 4);
+  head.writeUInt32LE(entries.length, 4 + vendor.length);
+  const parts = [head];
+  for (const e of entries) {
+    const s = Buffer.from(e, 'utf8');
+    const len = Buffer.alloc(4);
+    len.writeUInt32LE(s.length, 0);
+    parts.push(len, s);
+  }
+  return Buffer.concat(parts);
+}
+
+/**
+ * 拼 PICTURE body
+ * @param {object} o 允许通过 lie.descLen / lie.mimeLen / lie.dataLen 注入"说谎"的长度
+ */
+function makePictureBody(o) {
+  const mimeStr = o.mime == null ? 'image/jpeg' : o.mime;
+  const descStr = o.desc == null ? 'cover' : o.desc;
+  const data = o.data || Buffer.alloc(200, 0x41);
+  const mime = Buffer.from(mimeStr, 'latin1');
+  const desc = Buffer.from(descStr, 'utf8');
+  const buf = Buffer.alloc(4 + 4 + mime.length + 4 + desc.length + 16 + 4 + data.length);
+  let p = 0;
+  buf.writeUInt32BE(3, p); p += 4;                       // picType = 3（封面）
+  buf.writeUInt32BE((o.lie && o.lie.mimeLen) != null ? o.lie.mimeLen : mime.length, p); p += 4;
+  mime.copy(buf, p); p += mime.length;
+  buf.writeUInt32BE((o.lie && o.lie.descLen) != null ? o.lie.descLen : desc.length, p); p += 4;
+  desc.copy(buf, p); p += desc.length;
+  p += 16;                                              // w / h / depth / colors
+  buf.writeUInt32BE((o.lie && o.lie.dataLen) != null ? o.lie.dataLen : data.length, p); p += 4;
+  data.copy(buf, p);
+  return buf;
+}
+
+/** 拼任意块序列：blocks = [{ type, body }] */
+function makeFlacBlocks(blocks) {
+  const parts = [Buffer.from('fLaC', 'latin1')];
+  blocks.forEach((b, i) => {
+    const h = Buffer.alloc(4);
+    h[0] = (i === blocks.length - 1 ? 0x80 : 0) | (b.type & 0x7f);
+    writeUInt24(h, 1, b.body.length);
+    parts.push(h, b.body);
+  });
+  return Buffer.concat(parts);
+}
+
+function buildSong(pictureLie) {
+  const si = makeStreamInfo({ totalSamples: 44100 * 270, sampleRate: 44100 });
+  const vc = makeVorbisBody(['TITLE=晴天', 'ARTIST=周杰伦', 'ALBUM=叶惠美']);
+  const pic = makePictureBody(pictureLie ? { lie: pictureLie } : {});
+  return makeFlacBlocks([
+    { type: 0, body: si },
+    { type: 4, body: vc },
+    { type: 6, body: pic },
+  ]);
+}
+
+function testPicture() {
+  /* ---- G1. 合法封面必须照旧能解析出来（回归哨兵：边界检查不能误挡正常文件）---- */
+  {
+    const t = parseFlac(buildSong(null));
+    eq('[G1] 合法 PICTURE：durationSec 仍是 270', t && t.durationSec, 270);
+    eq('[G1] 合法 PICTURE：title 正常', t && t.title, '晴天');
+    ok('[G1] 合法 PICTURE：picture 仍被解析出来', !!(t && t.picture), JSON.stringify(t && t.picture && t.picture.mime));
+  }
+
+  /* ---- G2. descLen 说谎（QA 的复现用例）→ 真实数据必须活下来 ---- */
+  {
+    let t = null; let threw = null;
+    try { t = parseFlac(buildSong({ descLen: 1000 })); } catch (e) { threw = e.message; }
+    ok('[G2] descLen 说谎：parseFlac 不抛异常', !threw, threw);
+    eq('[G2] descLen 说谎：durationSec 仍是 270', t && t.durationSec, 270);
+    eq('[G2] descLen 说谎：title 仍是晴天', t && t.title, '晴天');
+    eq('[G2] descLen 说谎：artist 仍是周杰伦', t && t.artist, '周杰伦');
+    ok('[G2] descLen 说谎：picture 被丢弃而不是带崩全局', t && !t.picture, JSON.stringify(t && t.picture));
+  }
+
+  /* ---- G3. mimeLen 说谎 ---- */
+  {
+    let t = null; let threw = null;
+    try { t = parseFlac(buildSong({ mimeLen: 99999 })); } catch (e) { threw = e.message; }
+    ok('[G3] mimeLen 说谎：不抛异常', !threw, threw);
+    eq('[G3] mimeLen 说谎：durationSec 仍是 270', t && t.durationSec, 270);
+    eq('[G3] mimeLen 说谎：title 仍是晴天', t && t.title, '晴天');
+  }
+
+  /* ---- G4. dataLen 说谎 ---- */
+  {
+    let t = null; let threw = null;
+    try { t = parseFlac(buildSong({ dataLen: 0xffffff })); } catch (e) { threw = e.message; }
+    ok('[G4] dataLen 说谎：不抛异常', !threw, threw);
+    eq('[G4] dataLen 说谎：durationSec 仍是 270', t && t.durationSec, 270);
+    eq('[G4] dataLen 说谎：artist 仍是周杰伦', t && t.artist, '周杰伦');
+  }
+
+  /* ---- G5. 端到端（走 tags/index.js readTags）：坏封面文件落库值必须是对的 ---- */
+  {
+    const dir = path.join(os.tmpdir(), 'tp-unit-flac-picture');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'badpicture.flac');
+    try {
+      fs.writeFileSync(file, buildSong({ descLen: 1000 }));
+      const tags = readTags(file);
+      eq('[G5] 端到端：readTags 的 durationSec === 270（不是退化成 0）', tags.durationSec, 270);
+      eq('[G5] 端到端：readTags 的 sampleRate === 44100', tags.sampleRate, 44100);
+      eq('[G5] 端到端：readTags 的 title === 晴天', tags.title, '晴天');
+      eq('[G5] 端到端：readTags 的 artist === 周杰伦', tags.artist, '周杰伦');
+      ok('[G5] 端到端：没有退化成「仅文件名」', tags.title !== '' && tags.durationSec !== 0,
+        JSON.stringify({ t: tags.title, d: tags.durationSec }));
+    } finally {
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_) { /* 清理失败不影响结果 */ }
+    }
+  }
+
+  /* ---- G6. OGG：短 identification 包不得抛 RangeError ---- */
+  {
+    const { parseOgg } = require('../src/tags/flac');
+    const id = Buffer.concat([Buffer.from([0x01]), Buffer.from('vorbis', 'latin1'), Buffer.alloc(3)]);  // 仅 10 字节
+    const head = Buffer.alloc(27);
+    Buffer.from('OggS', 'latin1').copy(head, 0);
+    head[26] = 1;                       // 1 段
+    head[27 - 1] = 0;                   // 占位，段表写在 27 位之后
+    const seg = Buffer.from([id.length]);
+    const buf = Buffer.concat([head, seg, id]);
+    let threw = null; let t = null;
+    try { t = parseOgg(buf); } catch (e) { threw = e.message; }
+    ok('[G6] OGG 10 字节短包：不抛 RangeError', !threw, threw);
+    ok('[G6] OGG 短包：sampleRate 未被编造（保持缺失）', t && t.sampleRate === undefined, JSON.stringify(t && t.sampleRate));
+  }
+}
+testPicture();
 
 /* ========================================================================== */
 console.log('\n' + '─'.repeat(60));
