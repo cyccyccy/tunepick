@@ -10,6 +10,7 @@ const auth = require('./auth');
 const stream = require('./stream');
 const web = require('../web/router');
 const sqmusic = require('./sqmusic');
+const v1 = require('./v1');
 const { makeLogger } = require('../logger');
 const config = require('../config');
 
@@ -68,6 +69,12 @@ async function route(req, res, method, pathname, url) {
   if (!auth.checkApi(req)) return auth.unauthorized(res, 'api'), true;
 
   const P = pathname;
+
+  /* ===== 对外开放 API v1（Bearer 鉴权，与其他 /api/* 一致）=====
+   * 说明：v1.route 内部自带 404 / 500 处理（统一 {ok:false,error:{code}} 包），
+   *      因此这里直接 return true，不要落到文件末尾的兜底 404。
+   */
+  if (P.startsWith('/api/v1/')) { await v1.route(req, res, method, P, url); return true; }
 
   /* ===== 扫描 ===== */
   if (P === '/api/scan/start' && method === 'POST') return admin.scanStart(req, res), true;
