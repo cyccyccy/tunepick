@@ -209,6 +209,27 @@ function sizeEstBytes(bitrateKbps, durationSec) {
   return Math.round((kb * 1000 / 8) * sec);
 }
 
+/**
+ * 归一化下载进度（百分比）—— 对外语义补全
+ *
+ * SqMusic 上游**不提供真实下载进度**（progress 恒为 0），若原样透传，
+ * 调用方会看到「下载完成 = 0%」这种明显错误的语义。因此在 API 层补全：
+ *   success → 100（已完成就是 100%，不看上游）
+ *   其余状态 → 保留上游值，但夹到 [0, 99]：不允许非 success 状态出现 100%
+ *     （100% 是完成态的专属信号，运行中给 100% 会让调用方误判为已结束）
+ *
+ * @param {*} v 上游 progress（数字 / 字符串 / 缺失 / 脏值都要兜住）
+ * @param {string} status 已归一化的 v1 状态（waiting | running | success | error）
+ * @returns {number} 0..100 的有限数字
+ */
+function normalizeProgress(v, status) {
+  if (status === 'success') return 100;
+  const n = Number(v) || 0;
+  if (n < 0) return 0;
+  if (n > 99) return 99;
+  return n;
+}
+
 /** 下载任务 → taskLite */
 function taskLite(it) {
   const bitrateKbps = Number(it.bitrateKbps) || 0;
@@ -224,7 +245,7 @@ function taskLite(it) {
     album: it.album || '',
     brType: it.brType || '',
     status,
-    progress: Number(it.progress) || 0,
+    progress: normalizeProgress(it.progress, status),
     message: it.message || '',
     startedAt: it.startedAt || '',
     updatedAt: it.updatedAt || '',
