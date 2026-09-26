@@ -26,20 +26,32 @@ function shouldIgnore(name, relPath) {
   return false;
 }
 
-function walk(dir, root, out, depth = 0, budget = { count: 0 }) {
+/**
+ * 让出事件循环一次。
+ * 目录枚举是全同步的（readdirSync + statSync），上千个文件走完之前事件循环进不了
+ * poll/check 阶段，HTTP 服务照样不响应 —— 与扫描主循环是同一个根因。
+ */
+function yieldToEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+async function walk(dir, root, out, depth = 0, budget = { count: 0 }) {
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch (e) {
     return out;
   }
+  let filesHere = 0;
   for (const e of entries) {
     const abs = path.join(dir, e.name);
     const rel = path.relative(root, abs).split(path.sep).join('/');
     if (shouldIgnore(e.name, rel)) continue;
 
     if (e.isDirectory()) {
-      walk(abs, root, out, depth + 1, budget);
+      await walk(abs, root, out, depth + 1, budget);
+      // 每进出一个子目录让出一次：避免整棵目录树一次性同步走完
+      await yieldToEventLoop();
     } else if (e.isFile()) {
       const ext = path.extname(e.name).slice(1).toLowerCase();
       if (!AUDIO_EXT.has(ext)) continue;
@@ -55,6 +67,9 @@ function walk(dir, root, out, depth = 0, budget = { count: 0 }) {
         dirDepth: depth,
       });
       budget.count++;
+      // 扁平大目录（几万个文件塞在同一层）时，单层的 statSync 循环同样是一整段
+      // 无让出的同步阻塞 —— 按条目分批让出，把卡顿切成碎片而不是一次性冻住服务
+      if (++filesHere % 500 === 0) await yieldToEventLoop();
     }
   }
   return out;
@@ -85,7 +100,7 @@ function create() {
         throw Object.assign(new Error(`音乐目录不存在：${root}`), { hint: '检查 MUSIC_DIR 与 Docker 挂载' });
       }
       const t0 = Date.now();
-      const files = walk(root, root, [], 0);
+      const files = await walk(root, root, [], 0);
       log.info('目录枚举完成', { total: files.length, ms: Date.now() - t0, root });
       return files;
     },
