@@ -24,6 +24,20 @@ const STATE = {
   COMPLETED: 'completed', FAILED: 'failed', CANCELLED: 'cancelled',
 };
 
+/**
+ * 主动让出事件循环一次。
+ *
+ * 扫描循环里的"异步"大多是假异步：src.readTags() 内部是 fs.readSync（同步 I/O），
+ * db.flush() 是同步写盘 —— await 到的都是已经 resolve 的 Promise，只在微任务队列里
+ * 打转，事件循环进不了 poll/check 阶段。后果是扫描期间 HTTP 服务完全不响应：
+ * Web 页面「Failed to fetch」/ 一直加载中，进度看不到，暂停/取消按钮也点不动。
+ * setImmediate 把控制权交回 check 阶段，让 pending 的 HTTP 请求有机会被处理。
+ * 单次开销 <1ms，不作为可选项——服务不可用不是可以配置的行为。
+ */
+function yieldToEventLoop() {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 class ScanTask {
   constructor() {
     this.state = STATE.IDLE;
@@ -132,8 +146,11 @@ class ScanTask {
     if (r.mode === 'sample') {
       const size = opts.sampleSize || config.SAMPLE_SIZE;
       const tagsList = [];
+      let read = 0;
       for (const e of entries) {
         try { tagsList.push(await this.src.readTags(e)); } catch (_) { tagsList.push({}); }
+        // 抽样阶段要给全量条目读标签（同步 I/O），同样会让事件循环饿死 → 分批让出
+        if (++read % 8 === 0) await yieldToEventLoop();
       }
       const s = sampler.sample(entries, tagsList, size);
       entries = s.samples;
@@ -183,6 +200,16 @@ class ScanTask {
         this._persistRun();
       }
       this._emit();
+
+      /* ---------- 让出事件循环（关键修复） ----------
+       * 本循环里的"异步"全是假异步：readTags 内部是 fs.readSync（同步 I/O），
+       * db.flush() 是同步写盘，await 到的都是已完成的 Promise —— 只会在微任务队列里
+       * 打转，**事件循环永远进不了 poll/check 阶段**。后果是整个扫描期间 HTTP 服务
+       * 完全无法响应（Web 页面「Failed to fetch」/ 一直加载中，扫描进度看不到）。
+       * setImmediate 把控制权交回事件循环的 check 阶段，每个批次让出一次，
+       * HTTP 请求、进度轮询、暂停/取消按钮就都能及时响应了。
+       * 实测代价可忽略（每批 <1ms），不设成开关——服务不可用不是可选项。 */
+      await yieldToEventLoop();
     }
 
     // 收尾 L3
