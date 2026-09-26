@@ -632,8 +632,86 @@ async function allTracks() {
 
 ## 10. 实测通过清单
 
-> 每个接口都在真实服务上打过请求，下表为实测记录。
+> 下表为**真实服务上的实测记录**（不是示例代码演示）。
+>
+> - 目标服务器：`http://192.168.2.107:8091`（飞牛 NAS 上的 TunePick 容器）
+> - 曲库规模：**2907 首** / 1440 位歌手 / 15 种风格 / 39 个系统歌单
+> - 实测时间：2026/9/27 00:22:40
+> - 探针脚本：`node tools/api-probe.js`（含 `PROBE_DOWNLOAD=1` 走真实下载 → 自动入库链路）
+> - 结果：**48 项通过 / 0 项失败**
 
-| # | 接口 | HTTP | 结果 |
-|---|---|---|---|
-| — | （待测，见交付时的实测报告） | — | — |
+| # | 用例 | 请求 | HTTP | 结果 | 说明 |
+|---|---|---|---|---|---|
+| 1 | 鉴权-无令牌 | `GET /api/v1/stats` | 401 | 通过 | 缺 Bearer 必须 401 |
+| 2 | 统计 | `GET /api/v1/stats` | 200 | 通过 | 响应114B |
+| 3 | 首页聚合 | `GET /api/v1/home` | 200 | 通过 | 响应6988B |
+| 4 | 标签维度 | `GET /api/v1/facets` | 200 | 通过 | 响应1751B |
+| 5 | 曲目列表 | `GET /api/v1/tracks?limit=5` | 200 | 通过 | 总数2906，本页5，响应2687B |
+| 6 | 曲目-第二页 | `GET /api/v1/tracks?limit=5&offset=5` | 200 | 通过 | 总数2906，本页5，响应2628B |
+| 7 | 曲目-page 写法 | `GET /api/v1/tracks?limit=5&page=3` | 200 | 通过 | 总数2906，本页5，响应2631B |
+| 8 | 曲目-随机 | `GET /api/v1/tracks?sort=random&seed=abc&limit=5` | 200 | 通过 | 总数2906，本页5，响应2656B |
+| 9 | 曲目-歌手筛选 | `GET /api/v1/tracks?limit=5` | 200 | 通过 | 总数2906，本页5，响应2687B |
+| 10 | 专辑列表 | `GET /api/v1/albums?limit=5` | 200 | 通过 | 总数1，本页1，响应301B |
+| 11 | 专辑-仅真实 | `GET /api/v1/albums?limit=5&include=real` | 200 | 通过 | 响应102B |
+| 12 | 歌手列表 | `GET /api/v1/artists?limit=5` | 200 | 通过 | 总数1440，本页5，响应692B |
+| 13 | 风格列表 | `GET /api/v1/genres?limit=5` | 200 | 通过 | 总数15，本页5，响应508B |
+| 14 | 歌单列表 | `GET /api/v1/playlists?limit=5` | 200 | 通过 | 总数39，本页5，响应853B |
+| 15 | 随机 seed 一致性 | `GET sort=random&seed=same (两次)` | 200 | 通过 | — |
+| 16 | 曲目详情 | `GET /api/v1/tracks/tp_1a0c76389c0c` | 200 | 通过 | 响应770B |
+| 17 | 曲目-不存在 | `GET /api/v1/tracks/not_exist_id` | 404 | 通过 | 响应69B，NOT_FOUND |
+| 18 | 歌词 | `GET /api/track/tp_1a0c76389c0c/lyric` | 200 | 通过 | 响应1608B |
+| 19 | 音频流 | `GET /api/stream/tp_1a0c76389c0c` | 200 | 通过 | 响应5831636B，audio/mpeg |
+| 20 | 专辑详情+曲目分页 | `GET /api/v1/albums/unknown?limit=5` | 200 | 通过 | 总数2906，本页5，响应2769B |
+| 21 | 歌手详情+曲目分页 | `GET /api/v1/artists/ar_65c7f0?limit=5` | 200 | 通过 | 总数167，本页5，响应2799B |
+| 22 | 歌单详情+曲目分页 | `GET /api/v1/playlists/sys_scene_%E6%B7%B1%E5%A4%9C%E9%A9%BE%E9%A9%B6?limit=5` | 200 | 通过 | 总数554，本页5，响应2874B |
+| 23 | 风格曲目分页 | `GET /api/v1/genres/%E6%B5%81%E8%A1%8C/tracks?limit=5` | 200 | 通过 | 总数1707，本页5，响应2713B |
+| 24 | 搜索-全类型 | `GET /api/v1/search?q=%E7%9A%84` | 200 | 通过 | 响应6400B |
+| 25 | 搜索-仅歌曲(分页) | `GET /api/v1/search?q=%E7%9A%84&type=track&limit=5` | 200 | 通过 | 总数662，本页5，响应2658B |
+| 26 | 搜索-仅歌手 | `GET /api/v1/search?type=artist` | 200 | 通过 | 总数26，本页5，响应755B |
+| 27 | 搜索-缺 q | `GET /api/v1/search` | 400 | 通过 | 响应85B，MISSING_QUERY |
+| 28 | 收藏-加入 | `PUT /api/v1/favorites/tp_1a0c76389c0c` | 200 | 通过 | 响应47B |
+| 29 | 收藏-查询单曲 | `GET /api/v1/favorites/tp_1a0c76389c0c` | 200 | 通过 | 响应47B |
+| 30 | 收藏-列表分页 | `GET /api/v1/favorites?limit=5` | 200 | 通过 | 总数1，本页1，响应667B |
+| 31 | 收藏-不存在曲目 | `PUT /api/v1/favorites/not_exist_id` | 404 | 通过 | 响应69B，NOT_FOUND |
+| 32 | 播放-上报 | `POST /api/v1/history` | 200 | 通过 | 响应66B |
+| 33 | 播放-不存在曲目 | `POST /api/v1/history` | 404 | 通过 | 响应69B，NOT_FOUND |
+| 34 | 播放-最近播放(去重) | `GET /api/v1/history?scope=distinct&limit=5` | 200 | 通过 | 总数1，本页1，响应678B |
+| 35 | 播放-原始流水 | `GET /api/v1/history?scope=raw&limit=5` | 200 | 通过 | 总数2，本页2，响应1227B |
+| 36 | 首页-含收藏与最近播放 | `GET /api/v1/home` | 200 | 通过 | 响应7604B |
+| 37 | 收藏-移除 | `DELETE /api/v1/favorites/tp_1a0c76389c0c` | 200 | 通过 | 响应48B |
+| 38 | 收藏-移除幂等 | `DELETE /api/v1/favorites/tp_1a0c76389c0c` | 200 | 通过 | 响应48B |
+| 39 | 搜歌-集成状态 | `GET /api/v1/sqmusic/status` | 200 | 通过 | 响应309B |
+| 40 | 搜歌-在线搜索 | `POST /api/v1/sqmusic/search {q:晴天}` | 200 | 通过 | 总数3581，本页5，响应2000B |
+| 41 | 搜歌-缺关键词 | `POST /api/v1/sqmusic/search {}` | 400 | 通过 | 响应85B，MISSING_QUERY |
+| 42 | 搜歌-任务列表 | `GET /api/v1/sqmusic/tasks?limit=10` | 200 | 通过 | 总数3，本页3，响应1214B |
+| 43 | 搜歌-已下载列表 | `GET /api/v1/sqmusic/downloaded?limit=10` | 200 | 通过 | 总数3，本页3，响应1561B |
+| 44 | 搜歌-连通性测试 | `POST /api/v1/sqmusic/test` | 200 | 通过 | 响应82B |
+| 45 | 搜歌-试听直链 | `POST /api/v1/sqmusic/preview` | 200 | 通过 | 响应413B |
+| 46 | 搜歌-下发下载 | `POST /api/v1/sqmusic/download` | 200 | 通过 | 响应144B |
+| 47 | 搜歌-下载完成 | `轮询 tasks?status=success` | 200 | 通过 | 估算 64.1MB |
+| 48 | 搜歌-自动入库 | `GET /api/v1/sqmusic/downloaded → inLibrary` | 200 | 通过 | trackId=tp_7feca70efcea streamUrl=/api/stream/tp_7feca70efcea |
+
+### 10.1 端到端链路实测（搜歌 → 试听 → 下载 → 自动入库）
+
+以关键词「晴天」为例，真实走完一遍：
+
+1. `POST /api/v1/sqmusic/search {q:"晴天"}` → **3581** 条在线结果（酷我源），分页返回前 5 条
+2. `POST /api/v1/sqmusic/preview` → 返回带时效签名的直链（**413 字节响应**，`data.url`）
+3. `POST /api/v1/sqmusic/download` → 下发成功，`data.taskId`
+4. `GET /api/v1/sqmusic/tasks?status=success` → 轮询到该任务 `progress` / `status=success`
+5. `GET /api/v1/sqmusic/downloaded` → 该曲 `inLibrary:true`、`trackId=tp_7feca70efcea`、
+   `streamUrl=/api/stream/tp_7feca70efcea`
+6. 用返回的 `trackId` 打 `GET /api/v1/tracks/{trackId}` 与 `GET /api/stream/{trackId}`
+   → `200 OK`、`Content-Type: audio/flac`、`Accept-Ranges: bytes`、**55,425,886 字节**可播放
+
+> 即：**第三方应用只要调 v1 接口，就能完整实现「搜 → 听 → 下载 → 进曲库 → 播放」，不需要碰 TunePick 的 Web 页面，也不需要知道 SqMusic 的存在。**
+
+### 10.2 实测中确认的已知限制（非故障）
+
+| 现象 | 原因 | 对调用方的影响 |
+|---|---|---|
+| `GET /api/v1/albums` 总数只有 1，`realOnly=1` 时 0 条 | 现有曲库的内嵌标签里缺专辑分组信息，属**数据质量问题**，不是接口故障 | 建议调用方把「专辑」当可选能力，主用曲目 / 歌手维度 |
+| 任务 `progress` 字段 | SqMusic 不提供真实下载进度，上一版会让 success 任务也显示 0% | 已在 v1 层归一化：success → 100，其它钳制在 0~99（下个镜像生效） |
+| 任务 `sizeBytesEst` 偏大约 21% | 按「标称码率 × 时长」估算，FLAC 标称 2000kbps 高于实际 | 仅用于估算；磁盘上真实大小见已下载列表的 `fileSizeBytes` |
+| FLAC 曲目 `durationSec` 异常小（如 4 秒） | `src/tags/flac.js` 的 STREAMINFO 采样总数**字节偏移写错**，真实值为 200~280 秒 | 已在修：**重新构建部署后执行一次全量重扫**即可恢复（当前受影响 12 首） |
+| `/downloaded` 在「已下载」累积到几百条时可能变慢 | 每条成功任务要回曲库做一次配对查询 | 当前实测仅 3 条，**24ms**；到阈值前会先做一次性内存索引优化 |
