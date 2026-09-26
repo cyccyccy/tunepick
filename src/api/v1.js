@@ -22,6 +22,7 @@ const schema = require('../store/schema');
 const compatApi = require('./compat');
 const admin = require('./admin');
 const ud = require('../store/userdata');
+const v1sq = require('./v1-sq');
 const { makeLogger } = require('../logger');
 
 const log = makeLogger('api:v1');
@@ -620,6 +621,11 @@ async function readJsonBody(req) {
 async function route(req, res, method, P, url) {
   const sp = url.searchParams;
   try {
+    /* ===== 搜歌下载（SqMusic 代理）=====
+     * 单独一个模块；它内部自带 503 降级与 404 兜底，这里直接 return true。
+     */
+    if (P.startsWith('/api/v1/sqmusic')) { await v1sq.route(req, res, method, P, url); return true; }
+
     // ---- 首页聚合 ----
     if (P === '/api/v1/home' && method === 'GET') return ok(res, home(sp)), true;
 
