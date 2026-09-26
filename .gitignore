@@ -21,6 +21,13 @@ prototype/*.log
 # 本地运维脚本（推送 GitHub 用，含从环境变量读凭据的逻辑，不入库）
 /.gh-*.js
 
+# 测试临时数据目录
+.tmp-auth-test/
+.tmp-sqmusic-test/
+.tmp-qa-http/
+.tmp-qa-edge/
+.tmp-qa-v1/
+
 # 依赖
 node_modules/
 
