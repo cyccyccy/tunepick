@@ -26,11 +26,29 @@ function parseFlac(buf) {
     const body = buf.slice(off + 4, off + 4 + size);
 
     if (type === 0) {                       // STREAMINFO → 时长
-      const totalSamples = ((body[3] & 0x0f) << 32) | (body[4] << 24) | (body[5] << 16) | (body[6] << 8) | body[7];
-      const sampleRate = (body[10] << 12) | (body[11] << 4) | ((body[12] >> 4) & 0x0f);
-      if (sampleRate > 0) {
-        out.durationSec = Math.round(totalSamples / sampleRate);
-        out.sampleRate = sampleRate;
+      // STREAMINFO body 布局（body 已跳过 4 字节块头）：
+      //   0-1 minBlockSize | 2-3 maxBlockSize | 4-6 minFrameSize | 7-9 maxFrameSize
+      //   10-12 采样率（20bit，body[12] 高 4 位收尾）| 12 低 4 位起声道数(3bit) + 位深(5bit)
+      //   13 低 4 位 + 14-17 共 36bit = totalSamples
+      // 注意 JS 的 << 32 等于 << 0，必须用乘法接高 4 位（原代码正是踩了这个 + 偏移错两重坑）
+      // ⚠️ 长度不足 18 字节（即读不到 body[17]）时**一律不解析**：
+      //   块头声明的 size 大于实际读到的字节数（文件被截断 / 头部读取窗口不足）时，
+      //   body[13..17] 全是 undefined，而 JS 位运算会把 undefined 当 0 处理 ——
+      //   结果不是 NaN，而是**静默算出一个看起来合法的值**。实测（44100Hz / 270s 的样本）：
+      //     12 字节 → sampleRate=44096（错）、durationSec=0（错）
+      //     13-14 字节 → sampleRate=44100（对）、durationSec=0（错）
+      //     17 字节 → 少读一个字节，采样数少 184，靠四舍五入才碰巧仍是 270
+      //   这类值是有限数，能过 Number.isFinite，会**直接写进 db**，比 NaN 更难发现。
+      //   所以长度不够就什么都不设，由调用方（tags/index.js 的 base）兜成 0：
+      //   宁可缺字段，不可造数据。
+      if (body.length >= 18) {
+        const totalSamplesLo = (body[14] << 24) | (body[15] << 16) | (body[16] << 8) | body[17];
+        const totalSamples = (body[13] & 0x0f) * 0x100000000 + (totalSamplesLo >>> 0);
+        const sampleRate = (body[10] << 12) | (body[11] << 4) | ((body[12] >> 4) & 0x0f);
+        if (sampleRate > 0) {
+          out.durationSec = Math.round(totalSamples / sampleRate);
+          out.sampleRate = sampleRate;
+        }
       }
     } else if (type === 4) {                // VORBIS_COMMENT
       Object.assign(out, parseVorbisComment(body));
