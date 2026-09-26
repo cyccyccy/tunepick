@@ -192,6 +192,54 @@ function pad(s, n) { s = String(s); let w = 0; for (const ch of s) w += ch.charC
     record('收藏-移除幂等', 'DELETE', `/api/v1/favorites/${tid}`, 200, await request('DELETE', `/api/v1/favorites/${tid}`));
   }
 
+  /* ---------- 搜歌下载（SqMusic）---------- */
+  {
+    const st = await request('GET', '/api/v1/sqmusic/status');
+    record('搜歌-集成状态', 'GET', '/api/v1/sqmusic/status', 200, st);
+    const sqEnabled = !!(st.json && st.json.data && st.json.data.enabled);
+    if (!sqEnabled) {
+      record('搜歌-未启用降级', 'POST', '/api/v1/sqmusic/search', 503, await request('POST', '/api/v1/sqmusic/search', { q: '晴天' }), '未启用必须 503 SQMUSIC_DISABLED');
+    } else {
+      const sr = record('搜歌-在线搜索', 'POST', '/api/v1/sqmusic/search {q:晴天}', 200, await request('POST', '/api/v1/sqmusic/search', { q: '晴天', limit: 5 }));
+      const hits = (sr.json && sr.json.data && sr.json.data.items) || [];
+      record('搜歌-缺关键词', 'POST', '/api/v1/sqmusic/search {}', 400, await request('POST', '/api/v1/sqmusic/search', {}));
+      record('搜歌-任务列表', 'GET', '/api/v1/sqmusic/tasks?limit=10', 200, await request('GET', '/api/v1/sqmusic/tasks?limit=10'));
+      record('搜歌-已下载列表', 'GET', '/api/v1/sqmusic/downloaded?limit=10', 200, await request('GET', '/api/v1/sqmusic/downloaded?limit=10'));
+      record('搜歌-连通性测试', 'POST', '/api/v1/sqmusic/test', 200, await request('POST', '/api/v1/sqmusic/test'));
+
+      if (process.env.PROBE_DOWNLOAD === '1' && hits.length) {
+        const song = hits[0];
+        const pv = record('搜歌-试听直链', 'POST', '/api/v1/sqmusic/preview', 200, await request('POST', '/api/v1/sqmusic/preview', { key: song.key, brType: song.defaultBrType }));
+        const hasUrl = !!(pv.json && pv.json.data && pv.json.data.url);
+        if (!hasUrl) failed++;
+        record('搜歌-下发下载', 'POST', '/api/v1/sqmusic/download', 200, await request('POST', '/api/v1/sqmusic/download', { key: song.key, brType: song.defaultBrType }));
+        // 轮询任务直到完成（最多 120s）
+        let done = null;
+        for (let i = 0; i < 40 && !done; i++) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const tr = await request('GET', '/api/v1/sqmusic/tasks?status=success&limit=20');
+          const items = (tr.json && tr.json.data && tr.json.data.items) || [];
+          done = items.find((x) => x.title === song.title && x.artist === song.artist) || null;
+        }
+        rows.push({ name: '搜歌-下载完成', method: '轮询', url: 'tasks?status=success', status: done ? 200 : 408, expect: 'success', pass: !!done, total: '', items: '', bytes: 0, err: done ? '' : '120s 内未见到 success 任务', note: done ? `估算 ${(done.sizeBytesEst / 1048576).toFixed(1)}MB` : '' });
+        if (!done) failed++;
+        // 入库检查：未入库则触发 rescan 再等 60s
+        let dl = null;
+        for (let i = 0; i < 20 && !dl; i++) {
+          const d = await request('GET', '/api/v1/sqmusic/downloaded?limit=50');
+          const items = (d.json && d.json.data && d.json.data.items) || [];
+          dl = items.find((x) => x.inLibrary && x.title === song.title) || null;
+          if (!dl) {
+            if (i === 0) await request('POST', '/api/v1/sqmusic/rescan');
+            await new Promise((r) => setTimeout(r, 3000));
+          }
+        }
+        record('搜歌-自动入库', 'GET', '/api/v1/sqmusic/downloaded → inLibrary', 200, { status: dl ? 200 : 404, json: null, bytes: 0, text: '', error: dl ? '' : '未找到已入库曲目' }, dl ? `trackId=${dl.trackId} streamUrl=${dl.streamUrl}` : '下载了但没进曲库');
+        if (!dl) failed++;
+      }
+    }
+  }
+
   /* ---------- 输出 ---------- */
   console.log(pad('接口', 26) + pad('方法', 8) + pad('状态', 7) + pad('期望', 8) + pad('总数', 8) + pad('本页', 6) + pad('字节', 10) + '备注');
   console.log('-'.repeat(100));
