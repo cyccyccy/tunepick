@@ -441,6 +441,10 @@ const isErrEnv = (r, code) => !!r.json && r.json.ok === false && !!r.json.error
   ok('未完成任务不给 speedBpsEst（避免编造速度）',
     T.items.filter((x) => x.status !== 'success').every((x) => x.speedBpsEst === 0),
     JSON.stringify(T.items.map((x) => ({ s: x.status, v: x.speedBpsEst }))));
+  ok('**成功任务 elapsedSec 必须 > 0**（时间格式一旦解析失败会静默退化成 0，只有这条能抓到）',
+    T.items.filter((x) => x.status === 'success').length === 2
+    && T.items.filter((x) => x.status === 'success').every((x) => x.elapsedSec > 0),
+    JSON.stringify(T.items.filter((x) => x.status === 'success').map((x) => ({ t: x.title, e: x.elapsedSec }))));
 
   const fRun = await get('/api/v1/sqmusic/tasks?status=running');
   ok('?status=running → 2 条', fRun.json.data.items.length === 2, String(fRun.json.data.items.length));
@@ -588,6 +592,56 @@ const isErrEnv = (r, code) => !!r.json && r.json.ok === false && !!r.json.error
     ok(`启用态 ${label} → 404 NOT_FOUND 信封（不是 503 / 不是裸字符串）`,
       r.status === 404 && isErrEnv(r, 'NOT_FOUND'), String(r.status) + ' ' + r.text.slice(0, 140));
   }
+
+  /* =====================================================================
+   * J3. rescan 受理判定（P3 补丁）：不许谎报 started
+   *
+   * 白盒桩：直接替掉 scanTask.start 的返回值，模拟「被拒绝」的各种形状。
+   * 之所以必须打桩：start() 被拒的状态今天靠自然时序几乎造不出来，
+   * 而「换形状就又撒谎」恰恰是这条补丁要防的事，不打桩等于没测。
+   * ===================================================================== */
+  console.log('\n== J3. rescan 受理判定：被拒时不许报 started:true ==');
+  const scanMod = require('../src/scan/task');
+  const realStart = scanMod.start;
+  const realSt = scanMod.state;
+
+  /** 用桩替换 start 的返回形状，跑一次 rescan（跑完必还） */
+  async function rescanWith(fakeRet) {
+    scanMod.state = 'idle';                 // 保证先过 status() 闸门（running:false）
+    scanMod.start = async () => fakeRet;
+    try {
+      return await post('/api/v1/sqmusic/rescan', '');
+    } finally {
+      scanMod.start = realStart;
+      scanMod.state = realSt;
+    }
+  }
+
+  const rReject = await rescanWith({ accepted: false, reason: '已有任务在运行中' });
+  ok('① start() 明确拒绝（accepted:false）→ 200 + started:false + reason 非空',
+    rReject.status === 200 && isOkEnv(rReject) && rReject.json.data.started === false
+    && typeof rReject.json.data.reason === 'string' && rReject.json.data.reason.length > 0,
+    String(rReject.status) + ' ' + rReject.text.slice(0, 160));
+  ok('① 且不返回 taskId（不给客户端空 id 去轮询）',
+    rReject.json.data.taskId === undefined || rReject.json.data.taskId === '',
+    JSON.stringify(rReject.json.data));
+
+  const rShape1 = await rescanWith({});
+  const rShape2 = await rescanWith({ accepted: true, taskId: '' });
+  ok('② start() 没给 taskId（换形状 {} / {accepted:true,taskId:""}）→ started:false + 兜底 reason',
+    [rShape1, rShape2].every((r) => r.status === 200 && isOkEnv(r)
+      && r.json.data.started === false && !!r.json.data.reason),
+    JSON.stringify([rShape1.json.data, rShape2.json.data]));
+
+  const rReal = await rescanWith({ accepted: true, taskId: 'run_qa_fake_123' });
+  ok('③ 正常受理 → 200 + started:true + taskId 原样透出（未被改写）',
+    rReal.status === 200 && isOkEnv(rReal) && rReal.json.data.started === true
+    && rReal.json.data.taskId === 'run_qa_fake_123',
+    String(rReal.status) + ' ' + rReal.text.slice(0, 160));
+  ok('③ 受理成功时不返回 reason（成功态不夹带原因字段）',
+    rReal.json.data.reason === undefined, JSON.stringify(rReal.json.data));
+  ok('④ 打桩期间没有真的启动扫描（state/run 未被污染）',
+    scanMod.state === realSt, scanMod.state);
 
   /* =====================================================================
    * K. 降级：SQ_ENABLED=false
