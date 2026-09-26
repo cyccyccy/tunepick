@@ -441,10 +441,41 @@ const isErrEnv = (r, code) => !!r.json && r.json.ok === false && !!r.json.error
   ok('未完成任务不给 speedBpsEst（避免编造速度）',
     T.items.filter((x) => x.status !== 'success').every((x) => x.speedBpsEst === 0),
     JSON.stringify(T.items.map((x) => ({ s: x.status, v: x.speedBpsEst }))));
-  ok('**成功任务 elapsedSec 必须 > 0**（时间格式一旦解析失败会静默退化成 0，只有这条能抓到）',
+  ok('**成功任务 elapsedSec 必须 > 0**（唯一不绑定具体数值的守门：任何格式的耗时解析退化都会被抓到）',
     T.items.filter((x) => x.status === 'success').length === 2
     && T.items.filter((x) => x.status === 'success').every((x) => x.elapsedSec > 0),
     JSON.stringify(T.items.filter((x) => x.status === 'success').map((x) => ({ t: x.title, e: x.elapsedSec }))));
+
+  // ---- 时间格式矩阵：临时塞行进上游桩，验证 toMs() 对各类日期字符串的真实解析能力 ----
+  const fmtRow = (id, a, b) => ({
+    id, downloadStatus: 'waiting', downloadMusicname: id, downloadArtistname: '', downloadAlbumname: '',
+    downloadBrType: 'KW_MP3_320', downloadTime: a, downloadUpdateTime: b,
+  });
+  const FMT_EXPECT = { 'fmt-iso': 30, 'fmt-sec': 45, 'fmt-ms': 45, 'fmt-slash': 30, 'fmt-cn': 0 };
+  const baseLenBefore = TASKS_MIXED.length;
+  TASKS_MIXED.push(
+    fmtRow('fmt-iso', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:30.000Z'),
+    fmtRow('fmt-sec', '1767225600', '1767225645'),
+    fmtRow('fmt-ms', '1767225600000', '1767225645000'),
+    fmtRow('fmt-slash', '2026/01/01 00:00:00', '2026/01/01 00:00:30'),
+    fmtRow('fmt-cn', '2026年01月01日 00:00:00', '2026年01月01日 00:00:30'),
+  );
+  const tf = await get('/api/v1/sqmusic/tasks');
+  TASKS_MIXED.length = baseLenBefore;   // 立即还原，否则会污染下面 ?status= 筛选的计数断言
+  const byFmt = {};
+  (((tf.json || {}).data || {}).items || []).forEach((x) => { byFmt[x.title] = x.elapsedSec; });
+  ok('时间格式矩阵：5 个临时行全部经过 taskLite 换算并返回',
+    Object.keys(FMT_EXPECT).every((k) => k in byFmt), JSON.stringify(byFmt));
+  ok('时间格式矩阵：ISO / 纯数字秒 / 纯数字毫秒 / 斜杠日期 均正确（30/45/45/30）',
+    byFmt['fmt-iso'] === 30 && byFmt['fmt-sec'] === 45 && byFmt['fmt-ms'] === 45 && byFmt['fmt-slash'] === 30,
+    JSON.stringify(byFmt));
+  ok('[已知缺口·不可当作正确行为] 中文「年月日」退化为 0：真机若返回此格式须改 src/api/v1-sq.js:185 toMs()',
+    byFmt['fmt-cn'] === 0, String(byFmt['fmt-cn']));
+  const tfBack = await get('/api/v1/sqmusic/tasks');
+  ok('临时行已彻底还原（后续请求回到 6 条，矩阵没有留下副作用）',
+    TASKS_MIXED.length === baseLenBefore
+    && tfBack.json.data.items.length === 6 && tfBack.json.data.pagination.total === 6,
+    JSON.stringify(tfBack.json.data.pagination));
 
   const fRun = await get('/api/v1/sqmusic/tasks?status=running');
   ok('?status=running → 2 条', fRun.json.data.items.length === 2, String(fRun.json.data.items.length));
@@ -717,6 +748,105 @@ const isErrEnv = (r, code) => !!r.json && r.json.ok === false && !!r.json.error
   ok('回归：protectExisting 仍是 opt-in（rescan 显式传 true 才生效）',
     /if\s*\(\s*opts\.protectExisting\s*\)/.test(taskSrc) && !/protectExisting\s*[:=]\s*true\s*[,)]/.test(taskSrc),
     '默认值被改成 true');
+
+  /* =====================================================================
+   * N. toMs 日期格式矩阵（走真实 HTTP → 真实 taskLite → 真实 toMs）
+   *    为什么要有这一节：elapsedSec 依赖 upstream 的 downloadTime/downloadUpdateTime
+   *    格式，而 toMs() 是「已知将来可能被改」的函数（真机若出现中文年月日要加归一化
+   *    分支）。加分支的那一刻若顺手改坏了别的分支，只有这节会红 —— 其余断言用的是
+   *    ISO 和纯数字，覆盖不到斜杠/点分隔/倒挂/空值。
+   *    方法：临时往 TASKS_MIXED 注入带不同时间戳格式的行，取回后立即回滚。
+   * ===================================================================== */
+  console.log('\n== N. toMs 日期格式矩阵（真机时间格式的护城河） ==');
+  const FMT_ROWS = [
+    // [标签, startedAt, updatedAt, 期望 elapsedSec]
+    ['ISO带Z', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:30.000Z', 30],
+    ['斜杠日期', '2026/01/01 00:00:00', '2026/01/01 00:00:30', 30],
+    ['点分隔', '2026.01.01 00:00:00', '2026.01.01 00:00:30', 30],
+    ['纯数字-秒', '1767225600', '1767225645', 45],
+    ['纯数字-毫秒', '1767225600000', '1767225645000', 45],
+    ['倒挂-update早于start', '2026-01-01T00:00:30.000Z', '2026-01-01T00:00:00.000Z', 0],
+    ['空串', '', '', 0],
+    // ↓中文格式当前解析失败 → 0。这是「已知缺陷留痕」，不是我们认可该行为：
+    //   一旦有人加了年月日归一化分支，这条会红，提醒同步更新期望值与文档。
+    ['中文年月日', '2026年01月01日 00:00:00', '2026年01月01日 00:00:30', 0],
+  ];
+  const injected = FMT_ROWS.map(([n, a, b], i) => ({
+    id: 'fmt-' + i, downloadStatus: 'success', downloadMusicname: 'fmt-' + n,
+    downloadArtistname: '', downloadAlbumname: '', downloadBrType: 'KW_MP3_320',
+    downloadTime: a, downloadUpdateTime: b,
+  }));
+  const mixLen = TASKS_MIXED.length;
+  TASKS_MIXED.push(...injected);
+  let fmtRep;
+  try {
+    fmtRep = await get('/api/v1/sqmusic/tasks');
+  } finally {
+    TASKS_MIXED.splice(mixLen, injected.length);
+  }
+  const restoredRep = await get('/api/v1/sqmusic/tasks');
+  ok('N-0 临时注入行已回滚（曲库/后续断言看到的仍是原本 6 条）',
+    restoredRep.status === 200 && restoredRep.json.data.items.length === 6,
+    String(restoredRep.json.data.items.length));
+  ok('N-0 注入期间确实捞到了全部 8 行格式样本（否则下面每条都在空转）',
+    (fmtRep.json.data.items || []).filter((x) => x.id && x.id.startsWith('fmt-')).length === FMT_ROWS.length,
+    String((fmtRep.json.data.items || []).filter((x) => x.id && x.id.startsWith('fmt-')).length));
+  for (const [n, a, b, want] of FMT_ROWS) {
+    const hit = (fmtRep.json.data.items || []).find((x) => x.title === 'fmt-' + n);
+    const tag = n === '中文年月日' ? '[已知缺陷留痕] ' : '';
+    ok(`${tag}日期格式「${n}」（${a || '空'} → ${b || '空'}）→ elapsedSec=${want}`,
+      hit && hit.elapsedSec === want, hit ? String(hit.elapsedSec) : '该行未返回');
+  }
+
+  /* =====================================================================
+   * N2. progress 语义（工程师 2026-09 变更：success→100，其余夹到 [0,99]）
+   *     SqMusic 上游不提供真实进度（恒 0），旧实现原样透传 → 「已完成 = 0%」。
+   *     这里走真实 HTTP → taskLite → normalizeProgress，锁定对外语义而不是实现。
+   *     （与 tests/unit-v1-sq-progress.test.js 互补：那条是单元口径，这条是端到端口径）
+   * ===================================================================== */
+  console.log('\n== N2. progress 归一化语义（端到端） ==');
+  const PROG_ROWS = [
+    // [状态, 上游 progress, 期望对外 progress, 说明]
+    ['success', 0, 100, 'success + 上游0 → 100（本次修复的核心：旧实现这里给 0）'],
+    ['success', 7, 100, 'success 一律 100，不看上游给什么'],
+    ['success', '', 100, 'success + 缺失 → 100'],
+    ['downloading', 100, 99, '非 success 永不 100%（100 是完成态专属信号）'],
+    ['downloading', 50, 50, '非 success 正常区间原样保留'],
+    ['waiting', -5, 0, '负值夹到 0'],
+    ['error', 'abc', 0, '脏值兜到 0（不产生 NaN）'],
+  ];
+  const progInjected = PROG_ROWS.map(([st, p], i) => ({
+    id: 'prog-' + i, downloadStatus: st, downloadMusicname: 'prog-' + i,
+    downloadArtistname: '', downloadAlbumname: '', downloadBrType: 'KW_MP3_320',
+    progress: p, downloadTime: '2026-01-01T00:00:00.000Z',
+    downloadUpdateTime: '2026-01-01T00:00:30.000Z',
+  }));
+  const progBase = TASKS_MIXED.length;
+  TASKS_MIXED.push(...progInjected);
+  let progRep;
+  try {
+    progRep = await get('/api/v1/sqmusic/tasks');
+  } finally {
+    TASKS_MIXED.splice(progBase, progInjected.length);
+  }
+  const progItems = (progRep.json && progRep.json.data && progRep.json.data.items) || [];
+  const progAfter = await get('/api/v1/sqmusic/tasks');
+  const progAfterItems = (progAfter.json && progAfter.json.data && progAfter.json.data.items) || [];
+  ok('N2-0 注入期间捞到了全部 7 行 progress 样本，且回滚后恢复为原本 6 条',
+    progItems.filter((x) => x.id && x.id.startsWith('prog-')).length === PROG_ROWS.length
+    && progAfterItems.length === 6,
+    '注入期=' + progItems.filter((x) => x.id && x.id.startsWith('prog-')).length + ' 回滚后=' + progAfterItems.length);
+  for (let i = 0; i < PROG_ROWS.length; i++) {
+    const [st, raw, want, why] = PROG_ROWS[i];
+    const hit = progItems.find((x) => x.id === 'prog-' + i);
+    ok(`progress：${st} + 上游 ${JSON.stringify(raw)} → ${want} —— ${why}`,
+      hit && hit.progress === want, hit ? String(hit.progress) : '该行未返回');
+  }
+  // 回滚后回头验基线：原本的两条 success 任务（上游没给 progress）现在必须是 100
+  ok('N2-1 回滚后基线 success 任务（上游无 progress）→ 100（说明修复落在字段本身，不是只对注入行生效）',
+    progAfterItems.filter((x) => x.status === 'success').length === 2
+    && progAfterItems.filter((x) => x.status === 'success').every((x) => x.progress === 100),
+    JSON.stringify(progAfterItems.filter((x) => x.status === 'success').map((x) => ({ t: x.title, p: x.progress }))));
 
   upstream.close();
   console.log('\n通过 ' + pass + ' 项，失败 ' + fail + ' 项');
