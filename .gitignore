@@ -27,6 +27,7 @@ prototype/*.log
 .tmp-qa-http/
 .tmp-qa-edge/
 .tmp-qa-v1/
+.tmp-qa-v1sq/
 
 # 依赖
 node_modules/
