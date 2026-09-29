@@ -204,33 +204,167 @@ function namesMatch(a, b) {
   return a === b || a.includes(b) || b.includes(a);
 }
 
+/** 双方都有歌手时才要求歌手对得上（与旧逻辑一致：宁可判「未入库」也不瞎猜） */
+function artistOk(track, nArtist) {
+  if (!nArtist) return true;
+  const candArtist = normName(track.cleanArtist || track.artist);
+  if (!candArtist) return true;
+  return namesMatch(candArtist, nArtist);
+}
+
+/* ---------------- 文件名兜底配对 ----------------
+ * 为什么需要：SqMusic 下载的文件，其**内嵌标签**可能是繁体（实测「漂洋过海来看你」
+ * 入库后 title=飄洋過海來看你 / artist=劉明湘），而下载任务名是简体 →
+ * 按标题索引永远对不上。但**文件名**是 SqMusic 按任务信息写的简体
+ * （「漂洋过海来看你 - 刘明湘.flac」），且包含真实歌手 → 用它兜底非常可靠。
+ */
+
+/** 去扩展名后的文件名主体（「漂洋过海来看你 - 刘明湘.flac」→「漂洋过海来看你 - 刘明湘」） */
+function fileNameCore(fileName) {
+  return String(fileName || '').replace(/\.[a-zA-Z0-9]{1,5}$/, '').trim();
+}
+
+/** 文件名首段 = 歌名部分（按「 - 」切第一段；SqMusic 命名固定「歌名 - 歌手」） */
+function fileNameTitle(fileName) {
+  const base = fileNameCore(fileName);
+  const seg = base.split(/\s+[-–—]\s+/)[0] || base;
+  return seg.trim();
+}
+
 /**
- * 在 TunePick 曲库里找与「已下载任务条目」对应的曲目。
+ * 文件名路径的歌手校验：标签歌手对不上时，只要**文件名里含有任务歌手**也算过
+ * （文件名是 SqMusic 用任务信息拼的，可信度高于内嵌标签）。
+ */
+function artistOkViaFile(track, nArtist) {
+  if (!nArtist) return true;
+  if (artistOk(track, nArtist)) return true;
+  const inFile = normName(fileNameCore(track.fileName));
+  return !!inFile && inFile.includes(nArtist);
+}
+
+/** 建索引时一次最多取多少条（与 /api/export 同量级，够覆盖正常曲库） */
+const LIB_INDEX_LIMIT = 100000;
+
+/**
+ * 用「一次」db.filter 建「归一化歌名 → 曲目」索引（O(N)，N = 曲库条数）
  *
- * 复用现成的 db.filter（按 title+cleanTitle+artist+cleanArtist+album 做 includes 匹配），
- * 不另写一套遍历。
+ * ⚠️ 刻意复用 db.filter 而不是 db.all()：
+ *    1) 数据口径与排序顺序和旧实现完全一致（旧实现就是在 filter 的排序结果里取第一条），
+ *       配对结果不会因改实现而发生漂移；
+ *    2) 兼容既有测试对 db.filter 的桩替换。
+ *    关键变化是「只查一次」而不是「每条查一次」。
+ */
+function buildNameIndex(db) {
+  if (!db || typeof db.filter !== 'function') return null;
+  const r = db.filter({ limit: LIB_INDEX_LIMIT });
+  const items = (r && r.items) || [];
+  if (!Array.isArray(items) || !items.length) return null;   // 空库 → 交给 legacy 路径
+  const title = new Map();
+  const file = new Map();                                     // 文件名兜底索引（键 → 候选数组，同名文件段很常见）
+  for (const t of items) {
+    if (!t || typeof t !== 'object') continue;
+    const nName = normName(t.cleanTitle || t.title);
+    if (nName && !title.has(nName)) title.set(nName, t);     // 重名取排序靠前的那条（与旧实现一致）
+    const core = fileNameCore(t.fileName);
+    if (core) {
+      for (const k of new Set([normName(core), normName(fileNameTitle(t.fileName))])) {
+        if (!k) continue;
+        if (!file.has(k)) file.set(k, []);
+        file.get(k).push(t);
+      }
+    }
+  }
+  return { title, file };
+}
+
+/** 索引内配对：标题索引精确 → 标题互相包含兜底 → 文件名索引（精确 / 前缀互含） */
+function matchInIndex(index, name, artist) {
+  const nName = normName(name);
+  const nArtist = normName(artist);
+  if (!nName) return null;
+
+  // 1) 标题精确命中
+  const hit = index.title.get(nName);
+  if (hit && artistOk(hit, nArtist)) return hit;
+
+  // 2) 标题互相包含兜底：旧实现用的是 includes 双向匹配（「后来的我们」能对上「后来」），
+  //    精确表命中不了时线性扫一遍保留旧行为；这里只是字符串比较，不再有全库排序开销。
+  for (const [candName, t] of index.title) {
+    if (!namesMatch(candName, nName)) continue;
+    if (!artistOk(t, nArtist)) continue;
+    return t;
+  }
+
+  // 3) 文件名兜底：内嵌标签是繁体/异体字时标题路径全灭，但文件名是 SqMusic 按
+  //    任务信息写的简体。先精确（文件名首段=任务名），再前缀互含
+  //    （任务名带「-《…》电视剧插曲」副标题时，首段是它的前缀）。歌手校验放宽到
+  //    「文件名里含有任务歌手」即可（artistOkViaFile）。
+  const tryFileCandidates = (cands) => {
+    for (const t of cands || []) {
+      if (t && artistOkViaFile(t, nArtist)) return t;
+    }
+    return null;
+  };
+  let fHit = tryFileCandidates(index.file.get(nName));
+  if (fHit) return fHit;
+  for (const [candName, cands] of index.file) {
+    const matched = candName === nName || candName.startsWith(nName) || nName.startsWith(candName);
+    if (!matched) continue;
+    fHit = tryFileCandidates(cands);
+    if (fHit) return fHit;
+  }
+  return null;
+}
+
+/**
+ * 旧路径（仅在曲库为空 / db 没有 all() 时启用）：每条一次 db.filter。
+ * 保留它是为了行为兼容（db.filter 被桩替换时结果不变），此时 N≈0，成本可忽略。
+ */
+function legacyMatcher(db) {
+  if (!db || typeof db.filter !== 'function') return () => null;
+  return (name, artist) => {
+    const nName = normName(name);
+    const nArtist = normName(artist);
+    if (!nName) return null;
+    const r = db.filter({ q: name, limit: 50 });
+    for (const t of (r && r.items) || []) {
+      const candName = normName(t.cleanTitle || t.title);
+      if (!namesMatch(candName, nName)) continue;
+      const candArtist = normName(t.cleanArtist || t.artist);
+      if (nArtist && candArtist && !namesMatch(candArtist, nArtist)) continue;
+      return t;
+    }
+    return null;
+  };
+}
+
+/**
+ * 建一个「已下载条目 → 曲库曲目」的配对器。
+ *
+ * ⚠️ 为什么要它：旧实现是**每条**调一次 db.filter，
+ *    db.filter 会全库 filter + localeCompare 排序（zh 排序很贵）；
+ *    /api/sqmusic/downloaded 与 /api/v1/sqmusic/downloaded 最多 500 条
+ *    → 500 次全库排序，单次请求能把主线程钉死几秒。
+ *    改成「只查一次建索引 + 每条 O(1) 命中」，配对结果不变。
+ *
+ * @returns {(name:string, artist:string) => object|null} 配对函数
+ */
+function createLibraryMatcher() {
+  let db;
+  try { db = require('../store/db'); } catch (e) { return () => null; }
+  const index = buildNameIndex(db);
+  if (!index) return legacyMatcher(db);
+  return (name, artist) => matchInIndex(index, name, artist);
+}
+
+/**
+ * 在 TunePick 曲库里找与「已下载任务条目」对应的曲目（单条便捷入口）。
  * 防误配：歌名必须先对上；双方都有歌手时歌手也要对得上，否则宁可判「未入库」不瞎猜。
  *
  * @returns {object|null} 命中的曲目对象（含 filePath / fileSizeBytes），未命中 null
  */
 function matchTrackInLibrary(name, artist) {
-  const nName = normName(name);
-  const nArtist = normName(artist);
-  if (!nName) return null;
-
-  let db;
-  try { db = require('../store/db'); } catch (e) { return null; }
-  if (!db || typeof db.filter !== 'function') return null;
-
-  const r = db.filter({ q: name, limit: 50 });
-  for (const t of (r && r.items) || []) {
-    const candName = normName(t.cleanTitle || t.title);
-    if (!namesMatch(candName, nName)) continue;
-    const candArtist = normName(t.cleanArtist || t.artist);
-    if (nArtist && candArtist && !namesMatch(candArtist, nArtist)) continue;
-    return t;
-  }
-  return null;
+  return createLibraryMatcher()(name, artist);
 }
 
 /**
@@ -246,8 +380,10 @@ async function downloaded(res, url) {
     const r = await sq.downloaded({ pageIndex, pageSize });
     const cfg = await sq.configInfo().catch(() => ({ downloadPath: '', error: '' }));
 
+    // 整个列表共用一份索引：建一次 O(N)，之后每条 O(1)
+    const matchTrack = createLibraryMatcher();
     const items = (r.items || []).map((it) => {
-      const t = matchTrackInLibrary(it.name, it.artist);
+      const t = matchTrack(it.name, it.artist);
       return {
         ...it,
         trackId: t ? t.id : '',
@@ -346,6 +482,7 @@ module.exports = {
   readJson,
   maybeAutoScan,
   matchTrackInLibrary,
+  createLibraryMatcher,
   normName,
   namesMatch,
   AUTO_SCAN_COOLDOWN_MS,
