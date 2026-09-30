@@ -126,7 +126,9 @@ const config = {
   SQ_TIMEOUT_MS: int('SQ_TIMEOUT_MS', 15000),
 
   // ---- L3 LLM ----
-  LLM_ENABLED: bool('LLM_ENABLED', true),
+  // 2026-10-01 起停用：业务决定不再使用 AI 增强层，也不再接入 DeepSeek / 任何 LLM。
+  // 环境变量读取全部保留（便于回溯），但开关硬编码为关，L3 层永不生效。
+  LLM_ENABLED: false,
   LLM_PROVIDER: str('LLM_PROVIDER', 'deepseek'),
   LLM_ENDPOINT: str('LLM_ENDPOINT', ''),
   LLM_API_KEY: str('LLM_API_KEY', ''),
@@ -162,9 +164,11 @@ function ensureDirs() {
   try { fs.mkdirSync(path.dirname(config.paths.meta), { recursive: true }); } catch (_) {}
 }
 
-/** 是否配置了 LLM（决定 L3 是否启用） */
+/** 是否配置了 LLM（决定 L3 是否启用）
+ * 2026-10-01 起恒为 false：AI 增强层已停用，即使环境变量里还留着密钥也不会被采纳。
+ */
 function llmConfigured() {
-  return !!(config.LLM_API_KEY && config.LLM_API_KEY.trim());
+  return false;
 }
 
 /** 鉴权模式（供 /api/health 暴露） */
