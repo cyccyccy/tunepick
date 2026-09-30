@@ -1,0 +1,21 @@
+services:
+  tunepick:
+    image: "ghcr.io/cyccyccy/tunepick:latest"
+    container_name: "tunepick"
+    restart: "unless-stopped"
+    ports:
+      - "8090:8090"
+    volumes:
+      - "/vol1/music:/music:ro"
+      - "./data:/data"
+    environment:
+      - "TZ=Asia/Shanghai"
+      - "SOURCE_KIND=localfs"
+      - "MUSIC_DIR=/music"
+      - "DATA_DIR=/data"
+      - "AUTH_TOKEN=CHANGE_ME_token"
+      - "ADMIN_USER=admin"
+      - "ADMIN_PASSWORD=CHANGE_ME_password"
+      - "ONLINE_SOURCES=netease,caa"
+      - "ONLINE_ENABLED=true"
+# L3 LLM 已于 2026-10-01 停用（不再接入 DeepSeek）：相关环境变量已移除，请勿回填密钥
