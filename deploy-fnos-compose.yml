@@ -1,0 +1,65 @@
+# ============================================================
+# TunePick —— 飞牛 fnOS Docker Compose 即贴即用版
+#
+# 部署前必做（2 件）：
+# ① 把 GHCR 镜像设为公开（否则飞牛拉不了私有镜像）：
+#    GitHub 网页 → 右上角头像 → Your packages → tunepick
+#    → Package settings → Danger Zone → Change visibility → Public
+#    （只是镜像公开，代码仓库仍是私有的；镜像里没有任何密钥，配置全靠环境变量注入）
+# ② 改下面 4 个「← 必改」标记的值
+# ============================================================
+
+services:
+  tunepick:
+    image: ghcr.io/cyccyccy/tunepick:latest
+    container_name: tunepick
+    restart: unless-stopped
+
+    ports:
+      - "8090:8090"          # 浏览器访问 http://NAS的IP:8090
+
+    volumes:
+      # ← 必改①：改成你 NAS 上真实的音乐目录（含「歌手/专辑」子目录的那层）
+      #   飞牛文件管理器里看到的路径通常是 /vol1/... 开头
+      #   ⚠️ :ro 只读挂载必须保留——服务检测到音乐目录可写会拒绝启动（防误改原始文件的硬保护）
+      - /vol1/music:/music:ro
+      # 数据目录（数据库 + 封面缓存），自动创建在飞牛给本项目分配的目录下，不用改
+      - ./data:/data
+
+    environment:
+      - TZ=Asia/Shanghai
+
+      # ---- 数据源 ----
+      # localfs 一个字符都不能拼错（写成 local-fs 会拒绝启动，故意的保护）
+      - SOURCE_KIND=localfs
+      - MUSIC_DIR=/music
+      - DATA_DIR=/data
+
+      # ---- 鉴权 ----
+      # ← 必改②：API 访问令牌，手机 App 连接时填它（随便一串长随机字符即可）
+      #   留空则只允许本机访问
+      - AUTH_TOKEN=CHANGE_ME_please_fill_a_long_random_string
+      # ← 必改③：Web 管理界面的登录密码（用户名固定 admin）
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=CHANGE_ME_admin_password
+
+      # ---- 在线刮削（L2）----
+      # netease 是中文库唯一主力源；caa 补封面。
+      # MusicBrainz 对中文曲库实测命中仅 28~33%，去掉可把全库刮削从 ~5h 压到 ~45min
+      - ONLINE_SOURCES=netease,caa
+      - ONLINE_ENABLED=true
+
+      # ---- LLM 打标（L3）：流派/情绪/场景的唯一来源 ----
+      # ← 必改④：填你的 deepseek API Key（与 music-player 后端同一个即可）
+      #   不填则自动降级为只用 L1+L2（流派/情绪/场景会是 0%）
+# L3 LLM 已于 2026-10-01 停用（不再接入 DeepSeek）：相关环境变量已移除，请勿回填密钥
+      # 推理模型会先烧 token 在思考上，预算给不足会拿到空结果 → 打标静默失败
+
+    mem_limit: 1g
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8090/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
