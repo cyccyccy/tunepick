@@ -265,7 +265,8 @@ const BEARER = { authorization: 'Bearer testtoken', accept: 'application/json' }
   // 既有外观不应被污染
   const overview = await request('/', { headers: BEARER });
   const navCount = (overview.text.match(/data-nav="/g) || []).length;
-  ok('导航项数量 = 9（8 原有 + 1 新增 discover）', navCount === 9, String(navCount));
+  // 2026-10-01：「LLM 配置」入口下线（不再接入 DeepSeek），故少一项
+  ok('导航项数量 = 8（8 原有 + 1 新增 discover - 1 下线 llm）', navCount === 8, String(navCount));
 
   /* =====================================================================
    * 5. 既有缺陷（本次改动之前就存在，非本次引入）—— 用真实 ServerResponse 才能发现
