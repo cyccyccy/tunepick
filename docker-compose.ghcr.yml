@@ -48,14 +48,8 @@ services:
       - ONLINE_ENABLED=true
 
       # ---- LLM（L3：流派/情绪/场景的唯一来源，未配置则自动降级为 L1+L2）----
-      - LLM_ENABLED=true
-      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
-      - LLM_ENDPOINT=${LLM_ENDPOINT:-https://api.deepseek.com/chat/completions}
-      - LLM_API_KEY=${LLM_API_KEY:-}
-      - LLM_MODEL=${LLM_MODEL:-deepseek-flash}
+# L3 LLM 已于 2026-10-01 停用（不再接入 DeepSeek）：相关环境变量已移除，请勿回填密钥
       # ⚠️ 推理模型会先把 token 消耗在推理上，预算不足则 content 为空 → 打标失败
-      - LLM_MAX_TOKENS=16384
-      - LLM_BATCH_SIZE=8
 
       - TZ=Asia/Shanghai
 
