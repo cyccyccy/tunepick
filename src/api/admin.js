@@ -223,12 +223,21 @@ function cover(res, coverId, size) {
   }
   const found = covers.read(coverId, size);
   if (!found) return cover(res, 'placeholder', size);
+  let len = 0;
+  try { len = fs.statSync(found.path).size; } catch (_) { return cover(res, 'placeholder', size); }
   res.writeHead(200, {
     'Content-Type': found.mime,
-    'Content-Length': fs.statSync(found.path).size,
+    'Content-Length': len,
     'Cache-Control': 'public, max-age=604800',
   });
-  return fs.createReadStream(found.path).pipe(res);
+  // ⚠️ 必须监听 error：EISDIR / EACCES / 文件被删等会让 createReadStream 异步报错，
+  //    没有监听时它变成 uncaughtException，且响应头已发出但 body 永不到达 → 客户端挂死。
+  const rs = fs.createReadStream(found.path);
+  rs.on('error', (e) => {
+    log.warn('封面读取失败', { coverId, error: e && e.message });
+    try { res.destroy(); } catch (_) { /* 已断开 */ }
+  });
+  return rs.pipe(res);
 }
 
 function placeholderSvg() {
@@ -282,13 +291,27 @@ function reviewQueue(res, url) {
   });
 }
 
+/**
+ * 人工修正**不可写**的字段黑名单（P0 安全）
+ *
+ * 这些字段描述「文件在哪里、是什么」，一旦可改：
+ *   PATCH {"filePath":"../../../../etc/passwd"} + GET /api/stream/<id> = 读宿主任意文件。
+ * 只读直通的设计前提就是库内 filePath 可信，因此这里必须把它钉死。
+ * 命中黑名单只拒绝**该字段**，其余字段照常写入（不能整体 400，否则批量编辑会全军覆没）。
+ */
+const PATCH_DENY_FIELDS = new Set([
+  'id', 'filePath', 'fileName', 'fileExt', 'fileSizeBytes', 'fileMtime', 'dirDepth',
+]);
+
 /** 人工修正（自动锁定） */
 async function patchTrack(req, res, id) {
   const t = db.resolve(id);
   if (!t) return json(res, { ok: false, error: '曲目不存在' }, 404);
   const body = await readBody(req).then((b) => JSON.parse(b.toString('utf8'))).catch(() => ({}));
   const updated = [];
+  const denied = [];
   for (const [k, v] of Object.entries(body)) {
+    if (PATCH_DENY_FIELDS.has(k)) { denied.push(k); continue; }
     if (k === 'id' || !schema.FIELD_NAMES.includes(k)) continue;
     t[k] = v;
     if (!t.lockedFields.includes(k)) t.lockedFields.push(k);
@@ -302,7 +325,8 @@ async function patchTrack(req, res, id) {
   schema.finalize(t);
   db.upsert(t);
   db.flush(true);
-  return json(res, { ok: true, updated, lockedFields: t.lockedFields });
+  if (denied.length) log.warn('已忽略不可修改字段', { id, denied });
+  return json(res, { ok: true, updated, lockedFields: t.lockedFields, denied });
 }
 
 async function unlockTrack(req, res, id) {
@@ -322,11 +346,14 @@ async function batchUpdate(req, res) {
   const body = await readBody(req).then((b) => JSON.parse(b.toString('utf8'))).catch(() => ({}));
   const ids = body.ids || [];
   const patch = body.patch || {};
+  // 与 patchTrack 同一套黑名单：文件位置类字段不允许批量改（见 PATCH_DENY_FIELDS 注释）
+  const denied = Object.keys(patch).filter((k) => PATCH_DENY_FIELDS.has(k));
+  const fields = Object.entries(patch).filter(([k]) => !PATCH_DENY_FIELDS.has(k));
   let n = 0;
   for (const id of ids) {
     const t = db.resolve(id);
     if (!t) continue;
-    for (const [k, v] of Object.entries(patch)) {
+    for (const [k, v] of fields) {
       if (!schema.FIELD_NAMES.includes(k) || k === 'id') continue;
       t[k] = v;
       if (!t.lockedFields.includes(k)) t.lockedFields.push(k);
@@ -339,7 +366,8 @@ async function batchUpdate(req, res) {
     n++;
   }
   db.flush(true);
-  return json(res, { ok: true, updatedCount: n });
+  if (denied.length) log.warn('批量修改已忽略不可修改字段', { denied, count: ids.length });
+  return json(res, { ok: true, updatedCount: n, denied });
 }
 
 /* ==================== 数据源 / LLM ==================== */
@@ -392,9 +420,30 @@ function llmConfig(res) {
 }
 
 async function patchLlmConfig(req, res) {
+  // 2026-10-01 起停用：LLM 写入入口关闭，避免通过接口回填密钥重新连上外部模型。
+  return json(res, {
+    ok: false,
+    error: 'LLM 配置已停用（2026-10-01）：不再接入任何 LLM',
+    disabled: true,
+  }, 410);
   const body = await readBody(req).then((b) => JSON.parse(b.toString('utf8'))).catch(() => ({}));
   if (body.provider) config.LLM_PROVIDER = body.provider;
-  if (body.endpoint) config.LLM_ENDPOINT = body.endpoint;
+  if (body.endpoint) {
+    // SSRF / Key 外送防线（只卡协议，不卡 IP 段）：
+    //   file:// gopher:// data:// 之类能把本地文件读出去或把 API Key 送到非 HTTP 端点。
+    //   内网 IP **不拦** —— 用户自建局域网 LLM（如 http://192.168.1.9:11434）是合法场景。
+    const raw = String(body.endpoint).trim();
+    let u = null;
+    try { u = new URL(raw); } catch (_) { u = null; }
+    if (!u || (u.protocol !== 'http:' && u.protocol !== 'https:')) {
+      return json(res, {
+        ok: false,
+        error: `endpoint 协议不合法：${raw.slice(0, 120)}`,
+        hint: '仅允许 http:// 或 https://（自建局域网 LLM 同样受支持，但必须是这两个协议）',
+      }, 400);
+    }
+    config.LLM_ENDPOINT = raw;
+  }
   if (body.model) config.LLM_MODEL = body.model;
   if (body.apiKey !== undefined) config.LLM_API_KEY = body.apiKey;
   if (body.enabled !== undefined) config.LLM_ENABLED = !!body.enabled;
@@ -411,8 +460,12 @@ async function patchLlmConfig(req, res) {
 function llmModels(res) { return json(res, { models: llm.listModels() }); }
 
 async function llmTest(req, res) {
-  const r = await llm.test();
-  return json(res, r);
+  // 2026-10-01 起停用：连通性自检会真的往模型端点打请求，直接掐掉。
+  return json(res, {
+    ok: false,
+    error: 'LLM 已停用（2026-10-01）：不向任何外部地址发起请求',
+    disabled: true,
+  }, 410);
 }
 
 /** 按词表/模型版本重刷旧标签（FR-73） */
@@ -459,7 +512,8 @@ function exportData(res, url) {
         return `"${String(v).replace(/"/g, '""')}"`;
       }).join(','))
     );
-    const body = rows.join('\n');
+    // CRLF + BOM：Excel 直接双击打开不乱码（UTF-8 无 BOM 时 Excel 按本地编码解，中文全糊）
+    const body = '\uFEFF' + rows.join('\r\n');
     res.writeHead(200, {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': 'attachment; filename="tunepick-export.csv"',
@@ -467,7 +521,9 @@ function exportData(res, url) {
     });
     return res.end(body);
   }
-  const body = JSON.stringify({ exportedAt: new Date().toISOString(), total: items.length, tracks: items }, null, 2);
+  // ⚠️ 不 pretty：全库 22MB 缩进后体积翻倍且 stringify 明显变慢，
+  //    export 是给程序/存档用的，人读性由导入方负责。
+  const body = JSON.stringify({ exportedAt: new Date().toISOString(), total: items.length, tracks: items });
   res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
   return res.end(body);
 }
