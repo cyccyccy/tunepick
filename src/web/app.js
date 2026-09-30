@@ -48,7 +48,8 @@
   $('#btn-token').addEventListener('click', promptToken);
 
   /* ---------------- 路由 ---------------- */
-  const ROUTES = { overview, scan, report, review, library, detail, discover, sources, llm, logs };
+  // LLM 配置页已于 2026-10-01 下线（不再接入任何 LLM），故不注册 llm 路由
+  const ROUTES = { overview, scan, report, review, library, detail, discover, sources, logs };
   let pollTimer = null;
 
   function currentRoute() {
@@ -140,7 +141,7 @@
         </div>
         <div class="row">
           <label style="display:inline">样本量 <input id="sample-size" type="number" value="100" style="width:90px"></label>
-          <label style="display:inline"><input type="checkbox" id="use-l3" checked> 启用 LLM（L3）</label>
+          <!-- L3 LLM 已于 2026-10-01 停用 -->
         </div>
       </div>
 
@@ -157,11 +158,12 @@
     const bind = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
     const post = (p, body) => api(p, { method: 'POST', body: JSON.stringify(body || {}) });
 
-    bind('btn-full', async () => { await post('/api/scan/start', { mode: 'full', useL3: document.getElementById('use-l3').checked }); render(); });
-    bind('btn-inc', async () => { await post('/api/scan/start', { mode: 'incremental', useL3: document.getElementById('use-l3').checked }); render(); });
+    const useL3 = () => false; // L3 LLM 已于 2026-10-01 停用
+    bind('btn-full', async () => { await post('/api/scan/start', { mode: 'full', useL3: useL3() }); render(); });
+    bind('btn-inc', async () => { await post('/api/scan/start', { mode: 'incremental', useL3: useL3() }); render(); });
     bind('btn-sample', async () => {
       const size = parseInt(document.getElementById('sample-size').value, 10) || 100;
-      await post('/api/scan/sample', { size, useL3: document.getElementById('use-l3').checked });
+      await post('/api/scan/sample', { size, useL3: useL3() });
       render();
     });
     bind('btn-pause', async () => { await post('/api/scan/pause'); render(); });
@@ -214,7 +216,7 @@
         <div class="card"><div class="k">样本量</div><div class="v">${rep.sampled || 0} <small>/ 全库 ${rep.population || 0}</small></div></div>
         <div class="card"><div class="k">单曲耗时</div><div class="v">${rep.perTrackMs || 0} <small>ms</small></div></div>
         <div class="card"><div class="k">全量预估</div><div class="v">${Math.round((rep.estimateFullMs || 0) / 60000)} <small>分钟</small></div></div>
-        <div class="card"><div class="k">LLM</div><div class="v">${rep.llm && rep.llm.configured ? '已配置' : '未配置'}</div></div>
+        <div class="card"><div class="k">LLM</div><div class="v">已停用</div></div>
       </div>
 
       <h2>各源表现</h2>
