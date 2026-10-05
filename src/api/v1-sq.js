@@ -35,8 +35,12 @@ const json = admin.json;
 /** 封面地址复用 compat 的导出（与 /api/v1/* 同源，不另写一份） */
 const coverUrlOf = compatApi.coverUrl;
 
-/** 曲库配对：复用既有实现（不复制） */
-const matchTrackInLibrary = sqApi.matchTrackInLibrary;
+/**
+ * 曲库配对：复用既有实现（不复制）。
+ * ⚠️ 用 createLibraryMatcher 而不是 matchTrackInLibrary —— 后者每次调用都会重建一次索引，
+ *    已下载列表最多 500 条，等于建 500 次索引；这里建一次给整批复用。
+ */
+const createLibraryMatcher = sqApi.createLibraryMatcher;
 
 /** 任务列表一次取全的条数上限（超出截断） */
 const TASK_MAX = 500;
@@ -467,8 +471,9 @@ async function downloaded(res, url) {
     pageIndex++;
   }
 
-  // 曲库配对（每条一次 db.filter 查询；数量受 500 条上限约束）
-  const mapped = rows.map((it) => dlLite(it, matchTrackInLibrary(it.name, it.artist)));
+  // 曲库配对：整批共用一份曲库索引（一次遍历建表 + 每条 O(1) 命中）
+  const matchTrack = createLibraryMatcher();
+  const mapped = rows.map((it) => dlLite(it, matchTrack(it.name, it.artist)));
   const inLibrary = mapped.filter((x) => x.inLibrary).length;
 
   // counts 按过滤前的全量统计
