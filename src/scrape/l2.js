@@ -146,9 +146,13 @@ async function scrape(track, opts = {}) {
   }
 
   // ---------- CAA 兜底封面（由 MusicBrainz release id 驱动）----------
-  if (!out.cover && config.ONLINE_SOURCES.includes('caa')) {
+  // 尊重调用方传入的 sources（评审发现 #10）：否则 opts.sources 里关掉 caa 也不会生效
+  if (!out.cover && (opts.sources || config.ONLINE_SOURCES).includes('caa')) {
     const mb = allCandidates.find((c) => c.source === 'musicbrainz');
-    const relId = mb && mb.result._raw && mb.result._raw.mbReleaseId;
+    // ⚠️ mbReleaseId 在源归一化行（_src，即 fromMB 输出）上，match 层候选（_raw）不带该字段。
+    //    只读 _raw 会让 relId 恒为 undefined，整段 CAA 兜底成了死代码（清单外附带修复）。
+    const mbSrc = mb && (mb.result._src || mb.result._raw);
+    const relId = mbSrc && mbSrc.mbReleaseId;
     if (relId) {
       try {
         const pic = await require('./sources/caa').lookup(relId);
