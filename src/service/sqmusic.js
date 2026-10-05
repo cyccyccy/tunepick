@@ -44,7 +44,27 @@ let dirCache = { v: '', at: 0 };
  *    同一次播放会话内复用即可，绝不要跨会话缓存。
  */
 const PREVIEW_CACHE_TTL_MS = 30 * 1000;
+
+/**
+ * 试听缓存容量上限。
+ * 旧实现只 set 不清：用户连点试听 / 列表自动预览会让 Map 无界增长（每条都带一条直链）。
+ * 超过上限时淘汰最早加入的一半（Map 的迭代顺序即插入顺序）—— 与 searchCache 同样写法。
+ */
+const PREVIEW_CACHE_MAX = 500;
 const previewCache = new Map();
+
+/** 有界写入试听缓存：达到上限先淘汰最早的一半，再写入 */
+function putPreview(key, data) {
+  if (previewCache.size >= PREVIEW_CACHE_MAX) {
+    const drop = Math.ceil(PREVIEW_CACHE_MAX / 2);
+    let i = 0;
+    for (const k of previewCache.keys()) {
+      previewCache.delete(k);
+      if (++i >= drop) break;
+    }
+  }
+  previewCache.set(key, { data, at: Date.now() });
+}
 
 /** 音源中文名（仅用于界面展示） */
 const PLUGIN_LABELS = {
@@ -360,6 +380,9 @@ class SqMusicClient {
       headers['Content-Type'] = 'application/json';
     }
 
+    // 记录「本次请求用的是哪个 token」：401 时凭它做 CAS（见下方重登逻辑）
+    const sentToken = this.token;
+
     let res;
     try {
       res = await net.rawRequest(url, {
@@ -376,7 +399,11 @@ class SqMusicClient {
     // 401：token 失效（服务端重启/清库）→ 清缓存重登后重试一次
     if (res.status === 401 && opts.retryAuth !== false) {
       log.warn('SqMusic token 失效，自动重登后重试', { path });
-      this.token = '';
+      /* ⚠️ 必须 CAS：并发请求会同时撞到 401。
+       * 若无条件 this.token = ''，后到的请求会把前一个请求刚重登拿到的新 token 清掉，
+       * 于是下一次请求又要重登一次（严重时来回震荡）。
+       * 只有「当前 token 仍是本次请求发出的那个旧值」才清空 —— 说明期间没人重登成功过。 */
+      if (this.token === sentToken) this.token = '';
       return this._request(method, path, { ...opts, retryAuth: false });
     }
 
@@ -582,7 +609,7 @@ class SqMusicClient {
       artist: toStrArray(record.artistName).join(' / '),
       key,
     };
-    previewCache.set(ck, { data, at: Date.now() });
+    putPreview(ck, data);
     return { ...data };
   }
 
@@ -615,12 +642,23 @@ function resetClient() {
   return getClient();
 }
 
+/**
+ * 账号名掩码：状态接口是给前端/第三方看的，不该把 SqMusic 登录账号明文吐出去
+ * （前端目前不使用该字段，掩码不影响任何页面逻辑）。
+ */
+function maskAccount(u) {
+  const s = String(u == null ? '' : u).trim();
+  if (!s) return '';
+  if (s.length <= 2) return s.slice(0, 1) + '*';
+  return s.slice(0, 2) + '****' + s.slice(-1);
+}
+
 /** 集成状态（供 /api/sqmusic/status 与前端引导页使用） */
 function status() {
   return {
     enabled: !!config.SQ_ENABLED,
     baseUrl: config.SQ_BASE_URL || '',
-    username: config.SQ_USERNAME || '',
+    username: maskAccount(config.SQ_USERNAME),
     plugins: (config.SQ_PLUGINS || []).slice(),
     pluginLabels: PLUGIN_LABELS,
     brType: config.SQ_BR_TYPE || '',
@@ -643,6 +681,7 @@ module.exports = {
   pickConfigList,
   durationSecFromTask,
   PLUGIN_LABELS,
+  maskAccount,
   // 便捷入口：直接用单例
   search: (kw, opts) => getClient().search(kw, opts),
   download: (payload) => getClient().download(payload),
