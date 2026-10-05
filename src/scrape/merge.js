@@ -81,6 +81,13 @@ function applyField(track, field, value, source, confidence = 0.5) {
   const curConf = Number(track.fieldConfidence?.[field] ?? 0.5);
   if (cur && priorityOf(cur) > priorityOf(source)) {
     // 例外：低置信度的 L1 推断值（目录/文件名，<0.7）允许被显著更可信的结果覆盖
+    //
+    // ⚠️ 这条例外只在「新来源优先级更低」时起作用，所以 L1 必须如实标注来源：
+    //    真内嵌标签 → 'embed'(50)/0.7~0.9，在线源与 LLM 都盖不动（符合预期）；
+    //    文件名兜底 → 'filename'(10)/0.5，优先级本来就低于 online(25~30) 与
+    //    llm(22)，走不到这个分支，直接被覆盖。
+    //    若把文件名来源误标成 'embed'/0.7，则 curConf<0.7 恒假，
+    //    L2/L3 的 cleanTitle 会被 100% 丢弃（评审发现 #7）。
     const enough = Number.isFinite(confidence) && Number(confidence) >= curConf + 0.2;
     if (!(curConf < 0.7 && enough)) return 'lower-priority';
   }
