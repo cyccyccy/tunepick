@@ -23,6 +23,27 @@ const PLACEHOLDER_HASHES = new Set([
 
 const SIZE_RE = /^\d+$/;
 
+/**
+ * coverId 白名单（P2 二次解码路径逃逸的兜底）
+ * 真实格式只有一种：saveFromBuffer 生成的 'cv_' + sha1 前 12 位十六进制。
+ * 任何含 / \ . 或不符合该格式的 id 一律当占位图处理，绝不拿去拼文件路径。
+ */
+const COVER_ID_RE = /^cv_[0-9a-fA-F]{8,40}$/;
+
+/** coverId 是否安全（可用于拼文件路径） */
+function isSafeCoverId(coverId) {
+  return typeof coverId === 'string' && COVER_ID_RE.test(coverId);
+}
+
+/** 目录占用缓存有效期：/api/health 每次都算 = 每次全目录 readdir+stat（4826 文件冷测 377ms） */
+const USAGE_CACHE_TTL_MS = 60 * 1000;
+let usageCache = { v: 0, at: 0 };
+
+/** 让缓存立即失效（封面写入后调用，避免统计滞后一整分钟） */
+function invalidateUsageCache() {
+  usageCache = { v: 0, at: 0 };
+}
+
 function dir() { return config.paths.covers; }
 function fileFor(coverId, size) { return path.join(dir(), `${coverId}_${size || 0}.img`); }
 
@@ -34,15 +55,26 @@ function hashOf(buf) {
   return crypto.createHash('sha1').update(buf).digest('hex');
 }
 
-/** 当前封面目录占用（MB） */
+/**
+ * 当前封面目录占用（MB）
+ *
+ * ⚠️ 进程内缓存 60s：/api/health 是前端高频轮询接口，
+ *    每次都 readdirSync + N 次 statSync（4826 文件冷测 377ms）会把主线程钉住。
+ *    封面只在扫描时才新增，统计滞后一分钟无实际影响。
+ */
 function usageMB() {
+  const now = Date.now();
+  if (usageCache.at && now - usageCache.at < USAGE_CACHE_TTL_MS) return usageCache.v;
+  let total = 0;
   try {
-    let total = 0;
     for (const f of fs.readdirSync(dir())) {
       try { total += fs.statSync(path.join(dir(), f)).size; } catch (_) {}
     }
-    return +(total / 1024 / 1024).toFixed(2);
-  } catch (_) { return 0; }
+  } catch (_) {
+    return usageCache.at ? usageCache.v : 0;      // 目录读不到：有旧值先用旧值，否则 0
+  }
+  usageCache = { v: +(total / 1024 / 1024).toFixed(2), at: now };
+  return usageCache.v;
 }
 
 function withinBudget() {
@@ -146,6 +178,7 @@ async function saveFromBuffer(buf, source = 'embedded') {
   // 原图落盘
   try {
     fs.writeFileSync(fileFor(coverId, 0), buf);
+    invalidateUsageCache();          // 占用统计别滞后（withinBudget 依赖它）
   } catch (e) {
     log.error('封面写入失败', { coverId, error: e.message });
     return null;
@@ -174,6 +207,7 @@ async function saveSize(url, coverId, size) {
     const buf = await download(url);
     if (!buf || buf.length < 256) return false;
     fs.writeFileSync(fileFor(coverId, size), buf);
+    invalidateUsageCache();
     return true;
   } catch (_) { return false; }
 }
@@ -183,6 +217,9 @@ async function saveSize(url, coverId, size) {
  * ?size=300 → 精确命中 → 回落 300 → 回落原图 → 占位图
  */
 function read(coverId, size) {
+  // 入口即校验：任何不合规 id 直接当「没有这张封面」，上层回落到占位图。
+  // 这是二次解码逃逸（%252e%252e → ..）的最后一道兜底。
+  if (!isSafeCoverId(coverId)) return null;
   ensureDir();
   const want = SIZE_RE.test(String(size)) ? parseInt(size, 10) : NaN;
 
@@ -205,4 +242,5 @@ function read(coverId, size) {
 module.exports = {
   saveFromUrl, saveFromBuffer, saveSize, read, sniff, hashOf,
   usageMB, withinBudget, PLACEHOLDER_HASHES, download, fileFor,
+  isSafeCoverId, invalidateUsageCache, COVER_ID_RE,
 };
