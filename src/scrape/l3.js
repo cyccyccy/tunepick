@@ -95,7 +95,10 @@ function apply(track, raw) {
     return written;
   }
 
-  const conf = clamp(Number(raw.confidence) ?? 0.7);
+  // ⚠️ 不能写 `Number(raw.confidence) ?? 0.7`：Number(undefined) 是 NaN，
+  // `??` 只拦 null/undefined 不拦 NaN，默认 0.7 永远不会生效（评审发现 #8）。
+  const rawConf = Number(raw.confidence);
+  const conf = Number.isFinite(rawConf) ? clamp(rawConf) : 0.7;
   const put = (field, value, c = conf) => {
     if (merge.applyField(track, field, value, 'llm', c) === 'accepted') written.push(field);
   };
