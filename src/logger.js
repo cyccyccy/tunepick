@@ -62,7 +62,12 @@ function read({ tail = 200, level = '', q = '' } = {}) {
         JSON.stringify(e).toLowerCase().includes(k)
     );
   }
-  const n = Math.max(0, Math.min(parseInt(tail, 10) || 200, RING_MAX));
+  // ⚠️ tail 要区分「显式 0」与「非法值」：
+  //    tail=0 → 一条都不给（slice(-0) 会把整个数组原样返回，是经典陷阱）；
+  //    解析不出数字（NaN）→ 回落默认 200。
+  const parsed = parseInt(tail, 10);
+  const n = Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, RING_MAX)) : 200;
+  if (n === 0) return [];
   return out.slice(-n);
 }
 
