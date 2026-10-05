@@ -53,7 +53,16 @@ const server = http.createServer(async (req, res) => {
   } catch (_) {
     res.writeHead(400); return res.end('bad request');
   }
-  const pathname = decodeURIComponent(url.pathname);
+  // ⚠️ 解码必须在 try 内：GET /%ZZ 这类非法百分号编码会让 decodeURIComponent 抛 URIError，
+  //    一旦抛在 try 外，异常会绕过统一的 500 兜底与 finally，连接直接挂死（客户端等到超时）。
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch (_) {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: false, error: '请求路径编码非法', hint: 'URL 中的 % 转义序列不完整或非法' }));
+    return;
+  }
 
   // CORS（便于本地调试与第三方客户端）
   res.setHeader('Access-Control-Allow-Origin', '*');
