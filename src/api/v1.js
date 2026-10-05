@@ -634,7 +634,7 @@ async function route(req, res, method, P, url) {
     {
       const m = /^\/api\/v1\/tracks\/(.+)$/.exec(P);
       if (m && method === 'GET') {
-        const id = decodeURIComponent(m[1]);
+        const id = m[1]; // server.js 已统一 decode 一次；二次 decode 会让含字面 % 的 id/名称抛 URIError 并挂死连接
         const t = trackDetail(id);
         if (!t) return fail(res, 404, 'NOT_FOUND', '曲目不存在'), true;
         return ok(res, t), true;
@@ -646,7 +646,7 @@ async function route(req, res, method, P, url) {
     {
       const m = /^\/api\/v1\/albums\/(.+)$/.exec(P);
       if (m && method === 'GET') {
-        const id = decodeURIComponent(m[1]);
+        const id = m[1]; // server.js 已统一 decode 一次；二次 decode 会让含字面 % 的 id/名称抛 URIError 并挂死连接
         const r = albumDetail(id, sp);
         if (!r) return fail(res, 404, 'NOT_FOUND', '专辑不存在'), true;
         return ok(res, r), true;
@@ -658,7 +658,7 @@ async function route(req, res, method, P, url) {
     {
       const m = /^\/api\/v1\/artists\/(.+)$/.exec(P);
       if (m && method === 'GET') {
-        const id = decodeURIComponent(m[1]);
+        const id = m[1]; // server.js 已统一 decode 一次；二次 decode 会让含字面 % 的 id/名称抛 URIError 并挂死连接
         const r = artistDetail(id, sp);
         if (!r) return fail(res, 404, 'NOT_FOUND', '歌手不存在'), true;
         return ok(res, r), true;
@@ -670,7 +670,7 @@ async function route(req, res, method, P, url) {
     {
       const m = /^\/api\/v1\/genres\/(.+)\/tracks$/.exec(P);
       if (m && method === 'GET') {
-        const value = decodeURIComponent(m[1]);
+        const value = m[1]; // 同上：只保留 server.js 的一次解码，防字面 % 二次解码崩溃
         return ok(res, genreTracks(value, sp)), true;
       }
     }
@@ -680,7 +680,7 @@ async function route(req, res, method, P, url) {
     {
       const m = /^\/api\/v1\/playlists\/(.+)$/.exec(P);
       if (m && method === 'GET') {
-        const id = decodeURIComponent(m[1]);
+        const id = m[1]; // server.js 已统一 decode 一次；二次 decode 会让含字面 % 的 id/名称抛 URIError 并挂死连接
         const r = playlistDetail(id, sp);
         if (!r) return fail(res, 404, 'NOT_FOUND', '歌单不存在'), true;
         return ok(res, r), true;
@@ -702,7 +702,7 @@ async function route(req, res, method, P, url) {
     {
       const m = /^\/api\/v1\/favorites\/(.+)$/.exec(P);
       if (m) {
-        const id = decodeURIComponent(m[1]);
+        const id = m[1]; // server.js 已统一 decode 一次；二次 decode 会让含字面 % 的 id/名称抛 URIError 并挂死连接
         if (method === 'GET') {
           return ok(res, { favorited: ud.isFavorite(id), count: ud.favoriteCount() }), true;
         }
