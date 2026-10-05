@@ -30,7 +30,9 @@ async function handle(req, res, id) {
   try {
     const rangeHeader = config.STREAM_RANGE_ENABLED ? req.headers.range : null;
     const r = await src().readRange(track, rangeHeader);
-    const mime = MIME[track.fileExt] || 'application/octet-stream';
+    // Content-Type 优先用 source 给的（localfs 已按扩展名精确推断），
+    // 取不到再回落到本文件的扩展名表（navidrome 等 source 不返回该头时的兜底）。
+    const mime = r.headers['Content-Type'] || MIME[track.fileExt] || 'application/octet-stream';
     res.writeHead(r.status, {
       'Content-Type': mime,
       'Accept-Ranges': r.headers['Accept-Ranges'] || 'bytes',
@@ -42,9 +44,16 @@ async function handle(req, res, id) {
     r.stream.pipe(res);
     r.stream.on('error', (e) => { log.warn('音频流中断', { id, error: e.message }); try { res.end(); } catch (_) {} });
   } catch (e) {
-    log.error('音频流失败', { id, error: e.message });
-    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ ok: false, error: '读取音频失败：' + e.message, hint: '检查音乐目录挂载与文件权限' }));
+    // 路径越界（source 抛的 status=400）是客户端问题，不是服务端故障，别报 500
+    const status = Number(e && e.status) === 400 ? 400 : 500;
+    log.error('音频流失败', { id, status, error: e.message });
+    if (res.headersSent) { try { res.destroy(); } catch (_) {} return; }
+    res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      ok: false,
+      error: '读取音频失败：' + e.message,
+      hint: status === 400 ? '曲目文件路径不合法，疑似越出音乐目录' : '检查音乐目录挂载与文件权限',
+    }));
   }
 }
 
