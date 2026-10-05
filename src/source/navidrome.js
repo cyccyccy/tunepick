@@ -34,8 +34,21 @@ function getJson(urlStr, timeoutMs = 20000) {
       },
       (res) => {
         const chunks = [];
+        let settled = false;
+        const fail = (err) => {
+          if (settled) return;          // 'aborted' 之后可能紧跟 'error'，只结算一次
+          settled = true;
+          try { res.destroy(); } catch (_) { /* socket 可能已关闭 */ }
+          reject(err instanceof Error ? err : new Error(String(err)));
+        };
+        // ⚠️ 必须监听 error / aborted（评审发现 #1 同类）：只监听 data+end 时，
+        //    上游声明 Content-Length=N 却中途断开会让 Promise 永不结算，扫描批永久挂死。
+        res.on('error', fail);
+        res.on('aborted', () => fail(new Error('响应中断：对端在传输完成前关闭连接')));
         res.on('data', (c) => chunks.push(c));
         res.on('end', () => {
+          if (settled) return;
+          settled = true;
           const body = Buffer.concat(chunks).toString('utf8');
           if (res.statusCode >= 400) {
             return reject(Object.assign(new Error(`HTTP ${res.statusCode}`), { status: res.statusCode, body: body.slice(0, 300) }));
@@ -51,6 +64,14 @@ function getJson(urlStr, timeoutMs = 20000) {
   });
 }
 
+/**
+ * 构造 Subsonic API URL。
+ *
+ * ⚠️ 已知现状（评审已确认，**故意不改**，仅注释说明）：
+ *   密码以明文 query string 传递（Subsonic 协议的旧式鉴权，Navidrome 也支持
+ *   token+salt，但本适配器只用于本地开发回退源，且 URL 只在本机内存/日志出现）。
+ *   改成 token 鉴权需要同步改 config 与部署文档，改动风险大于收益。
+ */
 function api(cmd, extra = {}) {
   const base = config.NAVIDROME_URL.replace(/\/+$/, '');
   const q = new URLSearchParams({
@@ -68,6 +89,10 @@ function create() {
   const cache = { songs: null };
 
   async function fetchAll() {
+    // ⚠️ 已知现状（评审已确认，**故意不改**，仅注释说明）：cache.songs 一旦写入
+    //    就永不过期，进程生命周期内 NAS 上新增/删除的曲目不会被感知。
+    //    本适配器只用于开发回退源（一次扫描任务 = 一个进程），
+    //    加 TTL / 失效接口会引入跨调用的一致性问题，风险大于收益。
     if (cache.songs) return cache.songs;
     const url = api('search3.view', { query: '', songCount: '10000', songOffset: '0', albumCount: '0', artistCount: '0' });
     const t0 = Date.now();
