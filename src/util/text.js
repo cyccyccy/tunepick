@@ -108,9 +108,14 @@ function hasTitleSeparator(title) {
   return false;
 }
 
-/** Removes a leading track-number prefix such as `06 - ` or `35. `. */
+/** Removes a leading track-number prefix such as `06 - ` or `35. `.
+ *  也处理空格分隔的 `03 成都`（数字 + 空格 + 中文）：歌名不可能以「数字+空格+汉字」开头，
+ *  这是 ripper 从文件名带来的序号。仅限后接 CJK，避免误伤 `7 Years` 之类真歌名。 */
 function stripTrackPrefix(str) {
-  return String(str || '').replace(/^\s*\d{1,3}\s*[.\-_、]\s*/, '').trim();
+  return String(str || '')
+    .replace(/^\s*\d{1,3}\s*[.\-_、]\s*/, '')
+    .replace(/^\s*\d{1,3}\s+(?=[\u4e00-\u9fff])/, '')
+    .trim();
 }
 
 /** Removes decorative brackets but keeps their content (`中【3D环绕】X` -> `中 3D环绕 X`). */
