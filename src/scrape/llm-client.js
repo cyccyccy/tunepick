@@ -84,8 +84,8 @@ async function chat(messages, opts = {}) {
     } finally { clearTimeout(timer); }
   };
 
-  // 有代理时 fetch（undici）不读代理环境变量，必然失败 → 直接用原生通道
-  const order = hasProxyEnv() ? [viaRaw, viaFetch] : [viaRaw, viaFetch];
+  // 有代理时 fetch（undici）不读代理环境变量，必然失败 → 只用原生通道（评审发现 #9）
+  const order = hasProxyEnv() ? [viaRaw] : [viaRaw, viaFetch];
   let last = null;
   for (const fn of order) {
     try {
