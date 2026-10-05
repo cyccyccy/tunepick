@@ -24,9 +24,17 @@ const limiter = new net.RateLimiter(1000);
 
 const stats = { requests: 0, ok: 0, empty: 0, failed: 0, busy: 0, hits: 0 };
 
+/**
+ * MusicBrainz 官方硬性要求：User-Agent 必须是 `应用名/版本 (可联系方式)`，
+ * 缺联系信息会被限流甚至拒绝（评审发现 #11）。
+ */
+const MB_USER_AGENT = 'TunePick/1.0 (https://github.com/cyccyccy/tunepick)';
+
 function headers() {
+  // 运维通过 USER_AGENT 显式提供了带联系方式的 UA 时尊重之，否则用官方格式默认值
+  const ua = /https?:\/\//.test(config.USER_AGENT || '') ? config.USER_AGENT : MB_USER_AGENT;
   return {
-    'User-Agent': config.USER_AGENT,
+    'User-Agent': ua,
     Accept: 'application/json',
   };
 }
