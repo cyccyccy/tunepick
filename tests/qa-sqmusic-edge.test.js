@@ -424,8 +424,13 @@ function freePort() {
     for (const k of ENV_KEYS) delete process.env[k];
     process.env.HTTP_PROXY = 'http://127.0.0.1:1';   // 必连不上的假代理
 
-    const url = `http://127.0.0.1:${port}/api/config/login`;
-    ok('  proxyForUrl 已识别到假代理', netUtil.proxyForUrl(url) !== null, String(netUtil.proxyForUrl(url)));
+    // 公网域名 → 走代理（保持「旧签名不带 noProxy 仍走代理」的原意）
+    const url = 'http://example.test/api/config/login';
+    const localUrl = `http://127.0.0.1:${port}/api/config/login`;
+    ok('  proxyForUrl 已识别到假代理（公网域名）', netUtil.proxyForUrl(url) !== null, String(netUtil.proxyForUrl(url)));
+    // 新增规则守护：环回 / 内网 / 无点主机名一律直连，绝不被代理劫持
+    // （旧实现会把 127.0.0.1 的请求也发给代理，沙箱实测被代理回 200 假响应）
+    ok('  proxyForUrl 对环回地址返回 null（内网默认直连）', netUtil.proxyForUrl(localUrl) === null, String(netUtil.proxyForUrl(localUrl)));
 
     const tOld = await new Promise((resolve) => {
       netUtil.rawRequest(url, { method: 'GET', headers: {} })   // 旧签名：不带 noProxy
@@ -436,7 +441,7 @@ function freePort() {
       tOld.threw, JSON.stringify(tOld));
 
     const tNew = await new Promise((resolve) => {
-      netUtil.rawRequest(url, { method: 'GET', headers: {}, noProxy: true })
+      netUtil.rawRequest(localUrl, { method: 'GET', headers: {}, noProxy: true })
         .then((r) => resolve({ threw: false, status: r.status }))
         .catch((e) => resolve({ threw: true, code: e.code || e.message }));
     });
