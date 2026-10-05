@@ -22,6 +22,21 @@
  *   K. 降级：SQ_ENABLED=false → status 仍 200，其余一律 503 SQMUSIC_DISABLED（含未知路径）
  *   L. not-configured（缺 SQ_BASE_URL）也必须 503，不许漏成 500
  *   M. 回归 + 零依赖
+ *   N. toMs 日期格式矩阵（见下：这个文件将来最可能被改的就是它）
+ *   N2. progress 归一化语义（端到端口径，与 unit-v1-sq-progress 互补）
+ *
+ * ⚠️ 构造 fixture 的陷阱清单（每一条都是我自己踩过并浪费过一轮的，改本文件前先看这里）：
+ *   1. preview 有 30s 缓存：验证「取不到直链」必须换没取过的新鲜 key，热 key 打不到上游。
+ *   2. 临时 push 进 TASKS_MIXED / TASKS_SUCCESS 的注入行必须 splice 回滚，
+ *      否则后面所有依赖条数的断言会一起红，且看上去像业务 bug。
+ *   3. J 节验完任何故障模式必须把 state.mode 复位成 'ok'，否则是持久污染。
+ *   4. 判定未启用态的鉴权时不能用自带 Bearer 的 helper，要显式 request(p, {})。
+ *   5. 凡是处理 ≥32bit 整数的位操作，一律不许用位移 —— JS 位移量取模 32，
+ *      `v >>> 35` 等于 `v >>> 3`，会把低 4 位搬到高位上去（我用它写 fixture 时吃过亏，
+ *      报了 4 条假失败）。要写就用乘法或 BigInt。
+ *   6. 断言身份要区分「守门」与「哨兵」：绑死具体数值（30s / 45s / 400000 / 6 条）
+ *      的是哨兵，输入一变就失效；不变量断言（如 elapsedSec > 0）才是守门。
+ *      补新断言时请按这个标签写，不要把哨兵当守门使。
  *
  * 运行：node tests/qa-v1-sqmusic.test.js
  */
