@@ -87,6 +87,11 @@ function process(entry, tags = {}) {
   const album = garbledAlbum ? enc.fixGarbled(rawAlbum) : rawAlbum;
 
   t.isGarbled = wasGarbled;
+  // 评审发现 #7：无内嵌标题时标题来自文件名。来源必须区分开——
+  // 若继续标 'embed'（优先级 50 / 置信度 0.7），merge.applyField 的覆盖例外
+  // 要求 curConf < 0.7 恒不成立，L2 在线与 L3 LLM 的 cleanTitle 会被 100% 丢弃，
+  // 违背 PRD「回退粒度是字段、LLM 负责拆 歌手-曲名」的意图。
+  const titleFromFilename = !title;
   t.title = title || stripExt(t.fileName);
 
   // ---------- 2. 广告 / 引流识别 ----------
@@ -113,7 +118,10 @@ function process(entry, tags = {}) {
     applyField(t, 'cleanArtist', inferred, 'filename', 0.4);
     log.debug('从标题推断歌手', { id: t.id, inferred });
   }
-  applyField(t, 'cleanTitle', t.cleanTitle, 'embed', 0.7);
+  // 文件名推断的标题：来源标 filename（优先级 10）、置信度 0.4，
+  // 让 L2 在线（30）与 L3 LLM（22）都能按优先级 + 置信度例外正常覆盖。
+  // 真内嵌标签维持 embed/0.7 不变（H5~H9 既有行为）。
+  applyField(t, 'cleanTitle', t.cleanTitle, titleFromFilename ? 'filename' : 'embed', titleFromFilename ? 0.4 : 0.7);
 
   // ---------- 4. 专辑 ----------
   const albumVal = album && !schema.PSEUDO_VALUES.has(album.trim()) ? album.trim() : '';
