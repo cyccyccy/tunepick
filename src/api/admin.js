@@ -145,15 +145,19 @@ function scanLogs(res, url) {
 async function rescanTrack(req, res, id) {
   const t = db.resolve(id);
   if (!t) return json(res, { ok: false, error: '曲目不存在' }, 404);
+  // force=true 时强制覆盖已有歌词/封面（默认只在缺失时补，防止把好数据冲掉）。
+  // 用于修复历史错误匹配：如把「03 成都」匹配到恶搞版导致歌词张冠李戴。
+  const body = await readBody(req).then((b) => JSON.parse(b.toString('utf8'))).catch(() => ({}));
+  const force = !!(body && body.force);
   try {
     const r = await l2.scrape(t, { wantLyrics: true, wantCover: true });
     const { accepted } = merge.mergeFields(t, r.fields);
-    if (r.lyrics && !t.lyrics) {
+    if (r.lyrics && (force || !t.lyrics)) {
       t.lyrics = r.lyrics;
       t.lyricsSource = r.lyricsSource;
       t.lyricsHasTimeline = /\[\d{1,2}:\d{2}/.test(r.lyrics);
     }
-    if (r.cover && r.cover.url && !t.coverId) {
+    if (r.cover && r.cover.url && (force || !t.coverId)) {
       const saved = await covers.saveFromUrl(r.cover.url);
       if (saved) {
         t.coverId = saved.coverId; t.coverMime = saved.mime; t.coverHash = saved.hash;
