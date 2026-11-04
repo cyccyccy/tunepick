@@ -95,6 +95,34 @@ class DB {
   }
 
   // ---------- 写入 ----------
+  /**
+   * 从曲库移除一条曲目记录（磁盘文件被删除后的对账用）。
+   *
+   * 与 upsert 内部的 _indexRemove 不同：这里必须同时把对象从 order 数组里摘掉，
+   * 并把该 id 所属分片标脏 —— 否则分片 JSON 里的旧记录会在下次重启时被 load() 读回来，
+   * 表现为「删掉的歌又出现」。flush() 会为该分片写出空的 tracks 数组，覆盖旧记录。
+   * 注意：byCover 是全局共享封面缓存（多个曲目可能共用同一 coverHash），不随单曲
+   * 删除清理，避免误伤其他曲目；残留的封面缓存不影响曲目数据。
+   */
+  remove(track) {
+    const cur = track && track.id ? this.index.byId.get(track.id) : null;
+    if (!cur) return false;
+    this._indexRemove(cur);
+    const i = this.order.indexOf(cur);
+    if (i >= 0) this.order.splice(i, 1);
+    // _indexRemove 会无条件删掉 byDurPath 的键；若还有别的曲目共用同一
+    // 「时长|文件名」，把兜底索引重新指到那条记录，避免误伤。
+    if (cur.durationSec && cur.fileName) {
+      const key = cur.durationSec + '|' + cur.fileName;
+      const replacement = this.order.find(
+        (t) => t !== cur && t.durationSec === cur.durationSec && t.fileName === cur.fileName
+      );
+      if (replacement) this.index.byDurPath.set(key, replacement);
+    }
+    this.dirty.add(this.shardOf(cur.id));
+    return true;
+  }
+
   upsert(track) {
     const old = this.index.byId.get(track.id);
     if (old) this._indexRemove(old);
