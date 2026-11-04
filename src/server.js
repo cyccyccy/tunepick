@@ -111,6 +111,10 @@ server.listen(config.PORT, config.HOST, () => {
     vocab: config.VOCAB_VERSION,
   });
   if (!config.AUTH_TOKEN) log.warn('未设置 AUTH_TOKEN，仅允许 127.0.0.1 访问');
+  // 定时增量扫描：让「NAS 上直接删歌」无需人工点扫描也能自动对账。
+  // 调度器内部只在 localfs 且开关打开时启用；shutdown() 里会显式 stop()。
+  try { require('./scan/scheduler').start(); }
+  catch (e) { log.warn('定时增量扫描启动失败', { error: e.message }); }
 });
 
 // ---------- 优雅退出（PRD §8.3）----------
@@ -119,6 +123,7 @@ async function shutdown(sig) {
   if (shuttingDown) return;
   shuttingDown = true;
   log.info('收到退出信号，正在收尾', { sig });
+  try { require('./scan/scheduler').stop(); } catch (_) {}
   try { require('./scan/task').cancel(); } catch (_) {}
   try { db.flush(true); db.saveMeta(); } catch (_) {}
   server.close(() => {
