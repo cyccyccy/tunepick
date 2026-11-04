@@ -89,6 +89,14 @@ const config = {
   CHECKPOINT_EVERY: int('CHECKPOINT_EVERY', 20),
   VOCAB_VERSION: str('VOCAB_VERSION', 'vocab-v2'),
 
+  // ---- 删除对账：磁盘上已删掉的文件要从曲库索引里移除 ----
+  // 2026-11-04 修复「NAS 删歌后播放端仍能看到该曲目、点击提示不能播放」。
+  // 扫描原本只做 upsert，从不与磁盘现存文件做差集，导致分片 JSON 里的记录永久残留。
+  RECONCILE_ENABLED: bool('RECONCILE_ENABLED', true),
+  // 单次扫描允许移除的最大比例。超过即视为挂载丢失 / MUSIC_DIR 改错 / 权限异常，
+  // 拒绝执行并打日志，避免把整个曲库误清。确需批量清理时调高此值再扫描。
+  RECONCILE_MAX_DELETE_RATIO: num('RECONCILE_MAX_DELETE_RATIO', 0.5),
+
   // ---- L1-b 目录推断（Q-11）----
   PATH_INFER_ENABLED: bool('PATH_INFER_ENABLED', true),
   PATH_INFER_MIN_DEPTH: int('PATH_INFER_MIN_DEPTH', 2),
