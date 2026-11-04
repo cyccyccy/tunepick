@@ -544,6 +544,8 @@ function health(res) {
     sourceKind: config.SOURCE_KIND,
     coverUsageMB: covers.usageMB(),
     uptimeSec: Math.round(process.uptime()),
+    // 2026-11-04：定时增量扫描的可观测状态（免鉴权即可查，便于排障）
+    scheduledScan: require('../scan/scheduler').status(),
   });
 }
 
