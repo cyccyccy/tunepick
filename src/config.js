@@ -97,6 +97,15 @@ const config = {
   // 拒绝执行并打日志，避免把整个曲库误清。确需批量清理时调高此值再扫描。
   RECONCILE_MAX_DELETE_RATIO: num('RECONCILE_MAX_DELETE_RATIO', 0.5),
 
+  // ---- 定时增量扫描：NAS 上直接删歌后无需人工触发即可自动对账 ----
+  // 2026-11-04 按用户要求覆盖 PRD 决策 #11 / Q-15（原本规定服务不内置定时器）。
+  // 每次扫描都先做「完整枚举 → 删除对账」，再走增量过滤，因此周期扫描即可清残留。
+  // 设 SCAN_SCHEDULE_ENABLED=false 可退回纯外部调度（fnOS 计划任务 curl）。
+  SCAN_SCHEDULE_ENABLED: bool('SCAN_SCHEDULE_ENABLED', true),
+  SCAN_SCHEDULE_INTERVAL_MIN: int('SCAN_SCHEDULE_INTERVAL_MIN', 15),
+  // 启动后延迟首跑，避开容器刚拉起时的挂载抖动；0 = 立即
+  SCAN_SCHEDULE_BOOT_DELAY_SEC: int('SCAN_SCHEDULE_BOOT_DELAY_SEC', 60),
+
   // ---- L1-b 目录推断（Q-11）----
   PATH_INFER_ENABLED: bool('PATH_INFER_ENABLED', true),
   PATH_INFER_MIN_DEPTH: int('PATH_INFER_MIN_DEPTH', 2),
