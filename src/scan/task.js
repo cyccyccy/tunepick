@@ -5,6 +5,8 @@
  */
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const db = require('../store/db');
 const schema = require('../store/schema');
@@ -103,7 +105,7 @@ class ScanTask {
       failed: 0,
       startedAt: Date.now(),
       currentFile: '',
-      counters: { l1: 0, l2Hit: 0, l2Miss: 0, l3: 0, lyrics: 0, cover: 0, ad: 0, garbled: 0 },
+      counters: { l1: 0, l2Hit: 0, l2Miss: 0, l3: 0, lyrics: 0, cover: 0, ad: 0, garbled: 0, removed: 0 },
       opts,
     };
     this.state = STATE.RUNNING;
@@ -133,6 +135,16 @@ class ScanTask {
     let entries = await this.src.enumerate();
     this.run.stage = 'reading';
     this._emit();
+
+    // ---------- 1.5 删除对账 ----------
+    // 必须用「未经过增量过滤 / 抽样的完整枚举」做差集：增量过滤后只剩新增和变更
+    // 文件，拿它比对会把其余全部曲目误判成已删除。
+    // 历史 bug：NAS 上直接删掉音乐文件后，分片 JSON 里的记录永远不会被移除，
+    // 列表仍显示该曲目，播放时才因文件不存在报「不能播放」。
+    const recon = this._reconcileDeleted(entries);
+    r.counters.removed = recon.removed;
+    r.reconcile = { removed: recon.removed, skipped: recon.skipped || '', pending: recon.pending || 0 };
+    if (recon.removed) this._emit();
 
     // ---------- 2. 增量判定 ----------
     if (r.mode === 'incremental') {
@@ -229,6 +241,65 @@ class ScanTask {
     }
     this._persistRun();
     this._emit();
+  }
+
+  /**
+   * 删除对账：把「库里有、盘上已无」的曲目从索引和分片 JSON 中移除。
+   *
+   * 安全护栏（遵循「原文件严格只读」+「陈旧优于无数据」）：
+   *   1. 只删索引记录，绝不碰磁盘上的音乐文件；
+   *   2. 抽样试跑 / 非本地文件源 / 枚举为空 → 一律跳过，不改库；
+   *   3. 每个候选都用 existsSync 二次确认物理文件确实不存在，防止目录枚举不完整
+   *      （权限不足、软链、断链、挂载抖动）造成误删；
+   *   4. 待删比例超过阈值 → 拒绝执行，疑似挂载丢失或 MUSIC_DIR 配置变更。
+   *
+   * @param {Array} entries 完整的磁盘枚举结果（未经过增量过滤）
+   * @returns {{removed:number, skipped:string, pending:number}}
+   */
+  _reconcileDeleted(entries) {
+    const skip = (reason) => ({ removed: 0, skipped: reason, pending: 0 });
+    if (!config.RECONCILE_ENABLED) return skip('disabled');
+    if (this.run.mode === 'sample') return skip('sample');
+    if (!this.src || this.src.kind !== 'localfs' || !this.src.root) return skip('not-localfs');
+    if (!Array.isArray(entries) || entries.length === 0) {
+      log.warn('删除对账跳过：目录枚举为空（疑似挂载丢失或权限异常），保留原曲库');
+      return skip('empty-enumeration');
+    }
+
+    const diskPaths = new Set(entries.map((e) => e.filePath));
+    const all = db.all();
+    const candidates = all.filter((t) => t && t.filePath && !diskPaths.has(t.filePath));
+    if (!candidates.length) return skip('');
+
+    // 二次确认：拼回绝对路径再判断存在性，且必须仍在音乐根目录内（防路径穿越）
+    const root = path.resolve(this.src.root);
+    const missing = candidates.filter((t) => {
+      let abs;
+      try { abs = path.resolve(root, t.filePath); } catch (_) { return false; }
+      if (abs !== root && !abs.startsWith(root + path.sep)) return false;
+      return !fs.existsSync(abs);
+    });
+    if (!missing.length) return skip('');
+
+    const ratio = missing.length / Math.max(1, all.length);
+    const maxRatio = Math.max(0, Math.min(1, Number(config.RECONCILE_MAX_DELETE_RATIO) || 0));
+    if (ratio > maxRatio) {
+      log.warn('删除对账拒绝执行：待删比例过高，疑似挂载丢失或 MUSIC_DIR 配置变更', {
+        pending: missing.length, total: all.length, ratio: +ratio.toFixed(3),
+        maxRatio, hint: '确认无误后调高 RECONCILE_MAX_DELETE_RATIO 再扫描',
+      });
+      return { removed: 0, skipped: 'ratio-guard', pending: missing.length };
+    }
+
+    let removed = 0;
+    for (const t of missing) {
+      if (db.remove(t)) removed++;
+    }
+    if (removed) {
+      db.flush();
+      log.info('删除对账完成：已移除磁盘上不存在的曲目', { removed, totalAfter: db.all().length });
+    }
+    return { removed, skipped: '', pending: 0 };
   }
 
   /** 处理单曲：L1 → 合并 → L2 → 歌词 → 封面 → finalize */
@@ -407,6 +478,7 @@ class ScanTask {
       startedAt: this.run.startedAt,
       finishedAt: Date.now(),
       counters: this.run.counters,
+      reconcile: this.run.reconcile || null,
       distribution: this.run.distribution,
       population: this.run.population,
     };
